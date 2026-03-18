@@ -232,28 +232,40 @@ Adjustment discipline:
 
 Subagents may be used to reduce context pressure and parallelize grading work.
 
+Default granularity: **one question per subagent**. Each question has its own rubric, scoring type, and reference answer, so scoping a subagent to a single question keeps context clean and scoring consistent. Merge multiple simple questions into one subagent only when they share identical rubric structure (e.g., a series of identical MCQ items).
+
 Subagents are good for:
 - OCR and page-reading work for scanned submissions
-- Single-question grading loops
+- Single-question grading loops over a pre-assigned list of submission IDs
 - Independent answer-group evaluation
 - Drafting grading proposals for a bounded set of submissions
 
+#### Parallel Safety — ID Pre-Allocation
+
+**CRITICAL:** `tool_get_next_ungraded` has race conditions under parallel use. Multiple subagents calling it simultaneously will receive stale or duplicate results, leading to "all graded" false positives and wasted turns.
+
+Correct parallel workflow:
+1. **Main agent** fetches the full list of ungraded submission IDs upfront (e.g., via `tool_get_assignment_submissions` or by looping `tool_get_next_ungraded` sequentially before spawning subagents).
+2. **Main agent** partitions the IDs into non-overlapping batches and assigns each batch to a subagent.
+3. **Subagents** grade only their assigned IDs using `tool_get_submission_grading_context(submission_id=...)` and `tool_apply_grade(submission_id=...)`. They never call `tool_get_next_ungraded`.
+
+Prohibited in subagents:
+- `tool_get_next_ungraded` — causes race conditions; only the main agent may call this
+- Rubric mutations — unless the main agent explicitly delegates that exact rubric task
+- Inventing scoring conventions — subagents must follow the main agent's grading contract
+
 Main agent responsibilities:
 - Define the grading basis, rubric interpretation, and scoring convention
+- Pre-allocate submission IDs before spawning subagents
 - Keep global consistency across submissions and questions
 - Decide when a recurring issue requires rubric review
 - Handle user approval flow and any final escalation decisions
 
-Subagent permissions:
-- A subagent may read, assess, preview, and if explicitly authorized by the main agent, execute grading actions for its assigned submissions or groups
-- A subagent should not mutate the rubric unless the main agent explicitly delegates that exact rubric task
-- A subagent should not invent its own scoring convention; it must follow the main agent's grading contract
-
 Subagent prompt contract should include:
-- The exact `course_id`, `assignment_id`, `question_id`, and scoped `submission_id` or `group_id`
-- Whether the question should be treated as negative scoring by default
+- The exact `course_id`, `assignment_id`, `question_id`, and the specific list of `submission_id`s to grade
+- The question's scoring type (negative/positive) as read from the grading context
 - The approved reference answer or grading basis
-- The rubric interpretation
+- The rubric item list with IDs, descriptions, and weights
 - The confidence threshold for skipping
 - Whether the subagent may execute writes or only preview them
 
