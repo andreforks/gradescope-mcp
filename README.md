@@ -94,7 +94,7 @@ Built for **instructors and TAs** who want to use AI agents (Claude, Gemini, etc
 
 ### 2. Install
 ```bash
-git clone https://github.com/YuanpengLi-Gradescope/gradescope-mcp.git
+git clone https://github.com/Yuanpeng-Li/gradescope-mcp.git
 cd gradescope-mcp
 cp .env.example .env
 # Edit .env with your Gradescope credentials
