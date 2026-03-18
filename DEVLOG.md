@@ -5,6 +5,66 @@
 
 ---
 
+## Session 8 — 2026-03-18: JSON Payload Fix, Scoring Defaults, Parallel Grading Tool
+
+### What was done
+
+#### Bug fixes
+1. **`apply_grade` / `grade_answer_group` JSON payload** (`grading_ops.py`, `answer_groups.py`):
+   - Gradescope's frontend sends `Content-Type: application/json` with `{"rubric_items": {"ID": {"score": "true"}}, "question_submission_evaluation": {...}}`.
+   - Old code sent form-encoded `data=` with keys like `rubric_item_ids[ID]=true`, which returned 500.
+   - Fix: switched from `data=payload` to `json=payload` with the correct nested structure.
+
+2. **`scoring_type` default was wrong** (`grading_ops.py`):
+   - Default was `"positive"` (additive), but Gradescope defaults to `"negative"` (deduction: correct = 0, mistakes = negative weight).
+   - Fix: changed fallback in 3 locations from `"positive"` to `"negative"`.
+
+3. **Added scoring direction hints** (`grading_ops.py`):
+   - `get_submission_grading_context` now shows: `Rubric items **add** points` (positive) or `Starts at full marks. Rubric items **deduct** points for errors.` (negative).
+   - `get_question_rubric` also shows the scoring direction.
+   - Prevents agents from using the wrong rubric sign convention.
+
+#### New tool
+4. **`list_question_submissions`** (`grading_ops.py`, `server.py`):
+   - Scrapes all Question Submission IDs from `/questions/{qid}/submissions`.
+   - Supports `filter` param: `"all"`, `"ungraded"`, `"graded"`.
+   - Returns JSON with `submission_id`, `student_name`, `graded` status.
+   - **Why**: `get_assignment_submissions` returns Global Submission IDs (404 with grading tools). `get_next_ungraded` has race conditions under parallel use. This tool enables the main agent to pre-allocate specific Question Submission IDs to subagents.
+
+#### Skill updates
+5. **SKILL.md** (`skills/gradescope-assisted-grading/SKILL.md`):
+   - Added parallel grading best practices: one question per subagent, ID pre-allocation via `tool_list_question_submissions`.
+   - Added Global ID vs Question ID distinction warning.
+   - Added JSON payload debugging hint to safety rules.
+   - Previously graded submission skip-by-default policy.
+   - `/tmp` file persistence warning for cross-conversation sessions.
+
+#### Docstring corrections
+6. **`create_rubric_item` / `tool_create_rubric_item`** — updated weight semantics per scoring type (positive = adds points, negative = deducts points).
+
+### New tests added
+- `test_apply_grade_sends_json_payload` — verifies `json=` kwarg with correct nested structure
+- `test_positive_scoring_context_shows_add_hint` — verifies positive scoring shows "add points" hint
+
+### Test results
+- **20 automated tests** — all passing
+- 5 test files (unchanged)
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `tools/grading_ops.py` | JSON payload, scoring_type default, direction hints, `list_question_submissions` |
+| `tools/answer_groups.py` | JSON payload for `grade_answer_group` |
+| `server.py` | Import + register `tool_list_question_submissions`, docstring fix |
+| `skills/.../SKILL.md` | Parallel grading policy, ID pre-allocation, safety rules |
+| `tests/test_assignments_and_grading_ops.py` | 2 new tests |
+
+### Current state
+- **33 tools** + **3 resources** + **7 prompts**
+- 20 automated tests (all passing)
+
+---
+
 ## Session 7 — 2026-03-18: Bug Fix Sprint (10 fixes across 7 files)
 
 ### What was done

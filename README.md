@@ -11,7 +11,7 @@ batch grading, and individual grading.
 
 ## Features
 
-### Tools (32 total)
+### Tools (33 total)
 
 #### Core
 | Tool | Description | Access |
@@ -46,6 +46,7 @@ batch grading, and individual grading.
 | `tool_cache_relevant_pages` | Download crop page and adjacent pages to `/tmp` for local/vision review |
 | `tool_prepare_answer_key` | Cache an assignment-wide answer key to `/tmp` for repeated grading |
 | `tool_smart_read_submission` | Return a tiered crop/full-page/adjacent-page reading plan |
+| `tool_list_question_submissions` | List all Question Submission IDs for a question (supports filter: all/ungraded/graded). Essential for parallel subagent grading. |
 
 #### Grading — Answer Groups (Batch Grading)
 | Tool | Description |
@@ -246,7 +247,7 @@ For scanned PDF / handwritten assignments, missing structured reference answers 
 
 ## Testing
 ```bash
-uv run pytest -q   # 18 tests
+uv run pytest -q   # 20 tests
 ```
 
 ## Built With
