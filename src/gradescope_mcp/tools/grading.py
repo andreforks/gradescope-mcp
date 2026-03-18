@@ -352,23 +352,32 @@ def get_grading_progress(course_id: str, assignment_id: str) -> str:
     lines.append("| Question | Type | Graded | Total | Progress | Graders |")
     lines.append("|----------|------|--------|-------|----------|---------|")
 
-    # Group questions
-    question_groups = {}
+    # Group questions — two passes to handle any ordering
+    question_groups = {}  # parent_id -> group data with children
+    child_map = {}  # parent_id -> list of child questions
     standalone = []
 
+    # First pass: identify groups and collect children
     for qid, q in questions.items():
-        parent_id = q.get("parent_id")
         if q.get("question_group"):
             question_groups[q["id"]] = {**q, "children": []}
-        elif parent_id and parent_id in question_groups:
-            question_groups[parent_id]["children"].append(q)
+        elif q.get("parent_id"):
+            child_map.setdefault(q["parent_id"], []).append(q)
         else:
             standalone.append(q)
+
+    # Second pass: attach children to their groups
+    for parent_id, children in child_map.items():
+        if parent_id in question_groups:
+            question_groups[parent_id]["children"].extend(children)
+        else:
+            # Parent not found as a group — treat as standalone
+            standalone.extend(children)
 
     group_num = 0
     for gid, group in sorted(question_groups.items(), key=lambda x: x[1].get("index", 0)):
         group_num += 1
-        # Sort children
+        group_title = group.get("title", "")
         children = sorted(group.get("children", []), key=lambda x: x.get("index", 0))
 
         for i, child in enumerate(children, 1):
@@ -378,20 +387,28 @@ def get_grading_progress(course_id: str, assignment_id: str) -> str:
             total_count += count
             pct = f"{graded / count * 100:.0f}%" if count > 0 else "N/A"
             graders = ", ".join(g.get("name", "?") for g in child.get("graders", []))
+            child_title = child.get("title", "")
+            label = f"Q{group_num}.{i}"
+            if child_title:
+                label += f" {child_title}"
             qtype = child.get("type", "")
             lines.append(
-                f"| Q{group_num}.{i} (`{child['id']}`) | {qtype} | {graded} | {count} | {pct} | {graders or 'Unassigned'} |"
+                f"| {label} (`{child['id']}`) | {qtype} | {graded} | {count} | {pct} | {graders or 'Unassigned'} |"
             )
 
-    for sq in standalone:
+    for idx, sq in enumerate(sorted(standalone, key=lambda x: x.get("index", 0)), 1):
         graded_count = sq.get("total_graded_count", 0)
         count = sq.get("total_count", 0)
         total_graded += graded_count
         total_count += count
         pct = f"{graded_count / count * 100:.0f}%" if count > 0 else "N/A"
         graders = ", ".join(g.get("name", "?") for g in sq.get("graders", []))
+        sq_title = sq.get("title", "")
+        label = f"Q{group_num + idx}"
+        if sq_title:
+            label += f" {sq_title}"
         lines.append(
-            f"| Q (`{sq['id']}`) | {sq.get('type', '')} | {graded_count} | {count} | {pct} | {graders or 'Unassigned'} |"
+            f"| {label} (`{sq['id']}`) | {sq.get('type', '')} | {graded_count} | {count} | {pct} | {graders or 'Unassigned'} |"
         )
 
     lines.append("")
