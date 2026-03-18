@@ -173,7 +173,8 @@ Before grading, ask:
 
 If the answer is ambiguous:
 - Do not grade it
-- Add it to the skipped-review list
+- Add it to the skipped-review list with a direct grading link so the reviewer can open it immediately:
+  `https://www.gradescope.com/courses/{course_id}/questions/{question_id}/submissions/{submission_id}/grade`
 - Move to the next submission
 
 If the answer is gradable:
@@ -284,6 +285,8 @@ After each question or grading pass:
 At the end:
 - Call `tool_get_assignment_statistics(course_id, assignment_id)`
 - Report graded counts, skipped submissions, and any low-scoring questions that may indicate rubric issues
+- For every skipped submission, include a clickable Gradescope link:
+  `https://www.gradescope.com/courses/{course_id}/questions/{question_id}/submissions/{submission_id}/grade`
 
 ## Safety Rules
 
