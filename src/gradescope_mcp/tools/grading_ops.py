@@ -124,7 +124,9 @@ def get_submission_grading_context(
     evaluations = props.get("rubric_item_evaluations", [])
     applied_ids = {e["rubric_item_id"] for e in evaluations if e.get("present")}
 
-    # Navigation parsing
+    # Navigation parsing — filter out self-referencing ungraded links
+    # (Gradescope sets next_ungraded/previous_ungraded to the current
+    # submission when it is itself ungraded, which misleads agents)
     nav_parsed = {}
     for label, key in [
         ("previous_ungraded", "previous_ungraded"),
@@ -139,9 +141,13 @@ def get_submission_grading_context(
             qid_m = re.search(r"/questions/(\d+)", url)
             sid_m = re.search(r"/submissions/(\d+)", url)
             if qid_m and sid_m:
+                parsed_sid = sid_m.group(1)
+                # Skip self-referencing ungraded links
+                if key in ("previous_ungraded", "next_ungraded") and parsed_sid == submission_id:
+                    continue
                 nav_parsed[label] = {
                     "question_id": qid_m.group(1),
-                    "submission_id": sid_m.group(1),
+                    "submission_id": parsed_sid,
                 }
 
     # Answer group info
@@ -418,6 +424,11 @@ def apply_grade(
     """
     if not course_id or not question_id or not submission_id:
         return "Error: course_id, question_id, and submission_id are required."
+
+    # Defensive coercion: MCP clients / LLMs sometimes pass a single string
+    # instead of a list.  Wrap it so the rest of the logic works.
+    if isinstance(rubric_item_ids, str):
+        rubric_item_ids = [rubric_item_ids]
 
     if rubric_item_ids is None and point_adjustment is None and comment is None:
         return "Error: at least one of rubric_item_ids, point_adjustment, or comment must be provided."
@@ -699,8 +710,12 @@ def get_next_ungraded(
         except Exception as e:
             return f"Error: {e}"
 
-    nav = ctx["props"].get("navigation_urls", {})
+    props = ctx["props"]
+    nav = props.get("navigation_urls", {})
     next_url = nav.get("next_ungraded", "")
+
+    # Determine the current submission ID we're sitting on
+    current_sid = submission_id or str(props.get("submission", {}).get("id", ""))
 
     if not next_url:
         return "All submissions for this question are graded! 🎉"
@@ -715,7 +730,57 @@ def get_next_ungraded(
     next_qid = qid_m.group(1)
     next_sid = sid_m.group(1)
 
-    # Return the grading context for the next submission
+    # Gradescope sets next_ungraded to the CURRENT submission when it is
+    # itself ungraded.  The caller wants the NEXT one, so we must advance
+    # past the current submission via next_submission.
+    if next_sid == current_sid:
+        next_sub_url = nav.get("next_submission", "")
+        if not next_sub_url:
+            return (
+                "This is the only ungraded submission remaining for this "
+                "question.  Grade it first, then call `get_next_ungraded` "
+                "again to advance."
+            )
+        ns_qid_m = re.search(r"/questions/(\d+)", next_sub_url)
+        ns_sid_m = re.search(r"/submissions/(\d+)", next_sub_url)
+        if not ns_qid_m or not ns_sid_m:
+            return f"Could not parse next_submission URL: {next_sub_url}"
+
+        advance_qid = ns_qid_m.group(1)
+        advance_sid = ns_sid_m.group(1)
+
+        # Load the next submission to check whether it is ungraded
+        try:
+            advance_ctx = _get_grading_context(course_id, advance_qid, advance_sid)
+        except Exception:
+            # If we can't load it, just return it and let the caller deal
+            return get_submission_grading_context(
+                course_id, advance_qid, advance_sid, output_format
+            )
+
+        advance_sub = advance_ctx["props"].get("submission", {})
+        if not advance_sub.get("graded", False):
+            # It's ungraded — return this one
+            return get_submission_grading_context(
+                course_id, advance_qid, advance_sid, output_format
+            )
+
+        # It's graded — follow ITS next_ungraded (which should now
+        # point to a genuinely different ungraded submission)
+        adv_nav = advance_ctx["props"].get("navigation_urls", {})
+        adv_next = adv_nav.get("next_ungraded", "")
+        if adv_next:
+            a_qid_m = re.search(r"/questions/(\d+)", adv_next)
+            a_sid_m = re.search(r"/submissions/(\d+)", adv_next)
+            if a_qid_m and a_sid_m:
+                final_sid = a_sid_m.group(1)
+                if final_sid != advance_sid:
+                    return get_submission_grading_context(
+                        course_id, a_qid_m.group(1), final_sid, output_format
+                    )
+        return "All submissions for this question are graded! 🎉"
+
+    # Normal case: next_ungraded points to a different submission
     return get_submission_grading_context(course_id, next_qid, next_sid, output_format)
 
 

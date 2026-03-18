@@ -114,3 +114,12 @@ See **`DEVLOG.md`** for full history: builds, test results, bugs, API discoverie
 1. `gradescopeapi` roster parsing is buggy — custom parser in `tools/courses.py`
 2. `FastMCP()` v1.26 does NOT support `description` kwarg
 3. Resource templates register as templates, not static resources
+4. Extensions API returns 401 for some assignment types (exam/PDFAssignment) — `extensions.py` now handles this gracefully
+5. Gradescope's `next_ungraded` nav URL points to the current submission when it's ungraded — `get_next_ungraded` detects and advances past the self-loop
+6. Scanned PDF / handwritten assignments never have extractable reference answers — all tools now explain this clearly
+7. MCP clients / LLMs may pass `rubric_item_ids` as a single string instead of a list — both `apply_grade` and `grade_answer_group` auto-coerce
+
+## Current State
+- **32 tools** + **3 resources** + **7 prompts**
+- **18 automated tests** (all passing)
+- See `DEVLOG.md` for full development history

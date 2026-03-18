@@ -5,6 +5,72 @@
 
 ---
 
+## Session 7 — 2026-03-18: Bug Fix Sprint (10 fixes across 7 files)
+
+### What was done
+
+Systematic code review identified 12+ potential bugs; 10 were confirmed as real issues and fixed.
+
+#### Critical fixes
+1. **`get_next_ungraded` self-loop** (`grading_ops.py`):
+   - Gradescope's `next_ungraded` URL points to the *current* submission when it's itself ungraded.
+   - Old behavior: returned the same submission the caller was already on.
+   - Fix: detects the self-loop, advances via `next_submission`, checks if the next one is ungraded, and returns it. If it's graded, follows *its* `next_ungraded`.
+
+2. **`get_submission_grading_context` self-referencing nav** (`grading_ops.py`):
+   - `previous_ungraded`/`next_ungraded` nav entries that point to the current submission are now filtered out to avoid misleading agents.
+
+3. **`prepare_grading_artifact` fabricates "reference answer available"** (`grading_workflow.py`):
+   - Rubric-drafted fallback text was passed to `_compute_readiness()` as a real reference answer, inflating the score by +0.2.
+   - Fix: only real `explanation` goes into readiness scoring. The rubric draft is labeled "⚠️ Rubric-Based Fallback" in the artifact.
+
+4. **Readiness score inconsistency** (`grading_workflow.py`):
+   - Same root cause as item 3. Both `prepare_grading_artifact` and `assess_submission_readiness` now produce identical scores.
+
+#### High-priority fixes
+5. **`get_assignment_outline` missing question IDs** (`grading.py`):
+   - Standalone questions (no children) now output `**Question ID:** \`{id}\`` so downstream tools can find them.
+
+6. **Unclear 404 error for wrong submission ID type** (`grading_ops.py`):
+   - 404 error now includes a contextual hint: "This often means you are using a Global Submission ID instead of a Question Submission ID."
+
+7. **`apply_grade` / `grade_answer_group` rubric_item_ids coercion** (`grading_ops.py`, `answer_groups.py`):
+   - MCP clients sometimes pass a single string `"123"` instead of `["123"]`. Both functions now auto-wrap strings into lists.
+
+#### Medium/Low-priority fixes
+8. **`get_answer_groups` markdown "Type: (not set)"** (`answer_groups.py`):
+   - Falls back to per-group `question_type` when `assisted_grading_type` is None. Added Type column to the table.
+
+9. **`get_assignment_graders` leaking internal IDs** (`submissions.py`):
+   - No longer lists the filtered entries' internal IDs/labels. Only reports the count.
+
+10. **`extensions.py` 401 for exam-type assignments** (`extensions.py`):
+    - Catches 401 errors and returns a friendly message explaining that some assignment types don't support the extensions API.
+
+11. **Reference answer UX** (`grading_workflow.py`):
+    - All 3 "no reference answer" messages now explain this is expected for scanned PDF / handwritten assignments, not an extraction failure.
+
+### Test results
+- **18 automated tests** — all passing
+- 5 test files: `test_write_safety.py`, `test_grading_workflow.py`, `test_answer_groups.py`, `test_assignments_and_grading_ops.py`, `test_extensions_and_answer_key.py`
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `tools/grading_ops.py` | Self-loop fix, 404 hint, rubric_item_ids coercion |
+| `tools/grading_workflow.py` | Readiness fix, reference answer labeling, UX messages |
+| `tools/grading.py` | Standalone question ID output |
+| `tools/answer_groups.py` | Type column, rubric_item_ids coercion |
+| `tools/submissions.py` | Grader list sanitization |
+| `tools/extensions.py` | 401 error handling |
+| `tests/test_extensions_and_answer_key.py` | Updated assertions for new messages |
+
+### Current state
+- **32 tools** + **3 resources** + **7 prompts**
+- 18 automated tests (all passing)
+
+---
+
 ## Session 6 — 2026-03-17: Answer Groups, Rubric CRUD, JSON Output
 
 ### What was done

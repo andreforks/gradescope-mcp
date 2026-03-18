@@ -246,7 +246,10 @@ def _compute_readiness(
         score += 0.2
         reasons.append("Reference answer or explanation is available.")
     else:
-        reasons.append("No reference answer was found; use rubric-only grading.")
+        reasons.append(
+            "No reference answer was found. This is expected for scanned "
+            "PDF / handwritten assignments — use rubric-only grading."
+        )
 
     if crop_rects:
         score += 0.1
@@ -377,7 +380,10 @@ def prepare_grading_artifact(
         ref_section_body = rubric_draft
     else:
         ref_section_title = "## Reference Answer"
-        ref_section_body = "No reference answer is available."
+        ref_section_body = (
+            "No reference answer is available. For scanned PDF / handwritten "
+            "assignments, this is expected — grade based on the rubric items above."
+        )
 
     lines.extend(
         [
@@ -692,8 +698,9 @@ def prepare_answer_key(course_id: str, assignment_id: str) -> str:
             missing_answers.append(q["label"])
             lines.append("### Reference Answer")
             lines.append(
-                "⚠️ No reference answer available. "
-                "Please draft one or use the rubric for grading."
+                "⚠️ No reference answer available for this question. "
+                "This is typical for scanned PDF / handwritten assignments. "
+                "Use the rubric items as your grading criteria."
             )
             lines.append("")
 

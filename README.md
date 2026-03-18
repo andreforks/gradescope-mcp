@@ -173,7 +173,7 @@ For scanned exams, the server provides a tiered reading plan: crop region first,
 
 ## Testing
 ```bash
-uv run pytest -q
+uv run pytest -q   # 18 tests
 ```
 
 ## Built With

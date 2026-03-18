@@ -37,6 +37,14 @@ def get_extensions(course_id: str, assignment_id: str) -> str:
     except AuthError as e:
         return f"Authentication error: {e}"
     except Exception as e:
+        err = str(e)
+        if "401" in err or "Status code: 401" in err:
+            return (
+                f"⚠️ Extensions are not available for assignment `{assignment_id}`. "
+                "Some assignment types (e.g. exam-style or scanned PDF assignments) "
+                "do not support the extensions API endpoint, even for instructors. "
+                "You can still manage extensions via the Gradescope web UI."
+            )
         return f"Error fetching extensions: {e}"
 
     if not extensions:

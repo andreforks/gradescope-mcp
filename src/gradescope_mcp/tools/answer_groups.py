@@ -326,6 +326,11 @@ def grade_answer_group(
     if not course_id or not question_id or not group_id:
         return "Error: course_id, question_id, and group_id are required."
 
+    # Defensive coercion: MCP clients / LLMs sometimes pass a single string
+    # instead of a list.  Wrap it so the rest of the logic works.
+    if isinstance(rubric_item_ids, str):
+        rubric_item_ids = [rubric_item_ids]
+
     if rubric_item_ids is None and point_adjustment is None and comment is None:
         return "Error: at least one of rubric_item_ids, point_adjustment, or comment must be provided."
 
