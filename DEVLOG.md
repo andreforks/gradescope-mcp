@@ -53,11 +53,42 @@
 ### Files modified
 | File | Changes |
 |------|---------|
-| `tools/grading_ops.py` | JSON payload, scoring_type default, direction hints, `list_question_submissions` |
+| `tools/grading_ops.py` | JSON payload, scoring_type default, direction hints, `list_question_submissions`, rubric weight convention fix |
 | `tools/answer_groups.py` | JSON payload for `grade_answer_group` |
-| `server.py` | Import + register `tool_list_question_submissions`, docstring fix |
-| `skills/.../SKILL.md` | Parallel grading policy, ID pre-allocation, safety rules |
+| `server.py` | Import + register `tool_list_question_submissions`, docstring fixes |
+| `skills/.../SKILL.md` | Parallel grading policy, ID pre-allocation, batch approval, cross-agent consensus, scoring auto-detection, visual cross-validation, direct grading links, rubric weight guidance, safety rules |
 | `tests/test_assignments_and_grading_ops.py` | 2 new tests |
+
+#### Rubric weight convention fix
+7. **Rubric weights are always positive** (`grading_ops.py`, `server.py`, SKILL.md):
+   - Gradescope stores weights as positive numbers regardless of scoring type.
+   - `scoring_type` determines interpretation: positive = earned points, negative = deducted points.
+   - A deduction item with `weight=2.0` means "student loses 2 points" — the web UI shows `-2`.
+   - Fixed docstrings in `create_rubric_item` and `tool_create_rubric_item` that previously told agents to pass negative values.
+   - Updated scoring hints in `get_submission_grading_context` to clarify the positive-weight convention.
+
+#### SKILL design improvements
+8. **Batch approval** (SKILL.md):
+   - For 50+ submissions, agents collect previews into a summary table (student, score, rubric items, confidence, link).
+   - User approves in bulk: "全部通过" / "除了 #3" / "#3 改成 7 分".
+   - Batch size: 10–30 per approval round.
+
+9. **Cross-agent consensus** (SKILL.md):
+   - Main agent deduplicates rubric gap reports from parallel subagents.
+   - N ≥ 2 same-gap reports → one rubric proposal, not N alerts.
+   - Subagent return format: `gap_description`, `affected_submission_ids`, `suggested_rubric_change`.
+
+10. **Scoring mode auto-detection** (SKILL.md):
+    - Mandatory step before grading: read `scoring_type` from grading context.
+    - Stop if rubric weights conflict with stated scoring type.
+
+11. **Visual cross-validation** (SKILL.md):
+    - For numerical answers, compare crop vs full-page reading.
+    - OCR disagreement → force confidence < 0.6 → flag for human review.
+
+12. **Direct grading links** (SKILL.md):
+    - Skipped submissions include clickable Gradescope link: `https://www.gradescope.com/courses/{cid}/questions/{qid}/submissions/{sid}/grade`
+    - Post-grading report includes links for all skipped submissions.
 
 ### Current state
 - **33 tools** + **3 resources** + **7 prompts**
