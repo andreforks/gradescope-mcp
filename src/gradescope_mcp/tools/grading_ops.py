@@ -18,6 +18,21 @@ from gradescope_mcp.tools.safety import write_confirmation_required
 
 logger = logging.getLogger(__name__)
 
+_MISSING_PDF_MARKER = "missing_pdf"
+
+
+def _normalize_url(url: str) -> str:
+    """Normalize protocol-relative URLs to https."""
+    if url.startswith("//"):
+        return f"https:{url}"
+    return url
+
+
+def _is_placeholder_page(page: dict) -> bool:
+    """Check if a page is a placeholder/missing PDF image."""
+    url = page.get("url", "")
+    return _MISSING_PDF_MARKER in url or not url
+
 
 def _get_grading_context(course_id: str, question_id: str, submission_id: str) -> dict:
     """Fetch the SubmissionGrader page and extract all context needed for grading.
@@ -182,8 +197,9 @@ def get_submission_grading_context(
             } if groups_present else None,
 
             "pages": [
-                {"number": p.get("number"), "url": p.get("url")}
+                {"number": p.get("number"), "url": _normalize_url(p.get("url", ""))}
                 for p in pages if isinstance(p, dict) and p.get("url")
+                and not _is_placeholder_page(p)
             ][:5],
             "crop_regions": crop,
         }
@@ -191,7 +207,7 @@ def get_submission_grading_context(
 
     # Markdown output
     lines = [f"## Grading Context — Q{question.get('title', '?')}"]
-    lines.append(f"**Question ID:** `{question_id}` | **Submission ID:** `{submission_id}`")
+    lines.append(f"**Question ID:** `{question_id}` | **Question Submission ID:** `{submission_id}`")
     lines.append(f"**Student:** {submission.get('owner_names', 'Unknown')}")
     lines.append(f"**Weight:** {question.get('weight', '?')} pts")
     lines.append(f"**Current Score:** {submission.get('score', 'Ungraded')}")
@@ -241,10 +257,12 @@ def get_submission_grading_context(
             crop_pages = sorted(set(c.get("page_number") for c in crop if "page_number" in c))
             lines.append(f"**Relevant pages:** {crop_pages}")
         for p in pages[:3]:
-            if isinstance(p, dict) and p.get("url"):
-                lines.append(f"- Page {p.get('number', '?')}: [View]({p['url']})")
-        if len(pages) > 3:
-            lines.append(f"- _...and {len(pages) - 3} more pages_")
+            if isinstance(p, dict) and p.get("url") and not _is_placeholder_page(p):
+                page_num = p.get('number') or '?'
+                lines.append(f"- Page {page_num}: [View]({_normalize_url(p['url'])})")
+        real_pages = [p for p in pages if isinstance(p, dict) and not _is_placeholder_page(p)]
+        if len(real_pages) > 3:
+            lines.append(f"- _...and {len(real_pages) - 3} more pages_")
 
     return "\n".join(lines)
 
@@ -290,8 +308,10 @@ def get_question_rubric(course_id: str, question_id: str) -> str:
     except Exception as e:
         return f"Error fetching rubric: {e}"
 
-    question = ctx["props"].get("question", {})
-    rubric_items = question.get("rubric", [])
+    props = ctx["props"]
+    question = props.get("question", {})
+    # Use props.rubric_items (same source as grading context), fallback to question.rubric
+    rubric_items = props.get("rubric_items", []) or question.get("rubric", [])
 
     if not rubric_items:
         return f"No rubric items found for question `{question_id}`. You can create them with `tool_create_rubric_item`."

@@ -42,6 +42,14 @@ def _fetch_answer_groups_json(
             "X-Requested-With": "XMLHttpRequest",
         },
     )
+    if resp.status_code == 401:
+        raise ValueError(
+            f"Cannot access answer groups (status 401 Unauthorized). "
+            "Possible causes:\n"
+            "  1. AI-Assisted Grading is not enabled for this question\n"
+            "  2. Insufficient permissions (requires instructor/TA role)\n"
+            "  3. This question type does not support answer groups"
+        )
     if resp.status_code != 200:
         raise ValueError(
             f"Cannot access answer groups (status {resp.status_code}). "

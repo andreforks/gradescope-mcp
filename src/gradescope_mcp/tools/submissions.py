@@ -153,7 +153,7 @@ def _format_submissions_json(data: dict, assignment_id: str, course_id: str) -> 
     lines = [f"## Submissions for Assignment {assignment_id}\n"]
     lines.append(f"**Total submissions:** {total}")
     lines.append(f"**Graded:** {graded}/{total}\n")
-    lines.append("| # | Submission ID | Graded | Progress | Late |")
+    lines.append("| # | Global Submission ID | Graded | Progress | Late |")
     lines.append("|---|---------------|--------|----------|------|")
 
     for i, (sub_id, sub) in enumerate(sorted(subs.items(), key=lambda x: x[0]), 1):
@@ -233,7 +233,7 @@ def _get_submissions_from_review_grades(
     lines.append(f"**Total submissions:** {total}")
     lines.append(f"**Graded:** {graded}/{total}")
     lines.append("_(Note: retrieved from review_grades fallback)_\n")
-    lines.append("| # | Submission ID | Score | Graded |")
+    lines.append("| # | Global Submission ID | Score | Graded |")
     lines.append("|---|---------------|-------|--------|")
 
     for i, sub in enumerate(submissions, 1):
@@ -283,11 +283,20 @@ def get_assignment_graders(course_id: str, question_id: str) -> str:
     if not graders:
         return f"No graders found for question `{question_id}` in course `{course_id}`."
 
+    # Filter: some question types return raw user IDs instead of names
+    named_graders = [g for g in graders if not str(g).isdigit()]
+    id_only = [g for g in graders if str(g).isdigit()]
+
     lines = [
         f"## Graders for Question {question_id}\n",
-        f"**Total graders:** {len(graders)}\n",
+        f"**Total graders:** {len(named_graders)}\n",
     ]
-    for grader in sorted(graders):
+    for grader in sorted(named_graders):
         lines.append(f"- {grader}")
+
+    if id_only:
+        lines.append(f"\n⚠️ **Note:** {len(id_only)} grader(s) returned as numeric IDs "
+                      f"({', '.join(str(x) for x in id_only[:5])}), which may indicate "
+                      "system/auto-grader entries or a display issue.")
 
     return "\n".join(lines)

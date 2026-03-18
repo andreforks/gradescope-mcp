@@ -18,6 +18,21 @@ from gradescope_mcp.auth import AuthError, get_connection
 from gradescope_mcp.tools.grading import _get_outline_data
 from gradescope_mcp.tools.grading_ops import _get_grading_context
 
+_MISSING_PDF_MARKER = "missing_pdf"
+
+
+def _normalize_url(url: str) -> str:
+    """Normalize protocol-relative URLs to https."""
+    if url.startswith("//"):
+        return f"https:{url}"
+    return url
+
+
+def _is_placeholder_page(page: dict) -> bool:
+    """Check if a page is a placeholder/missing PDF image."""
+    url = page.get("url", "")
+    return _MISSING_PDF_MARKER in url or not url
+
 
 def _fetch_assignment_questions(course_id: str, assignment_id: str) -> dict[str, dict]:
     """Fetch question metadata for an assignment from grade.json."""
@@ -301,6 +316,7 @@ def prepare_grading_artifact(
     pages = [
         page for page in props.get("pages", [])
         if isinstance(page, dict) and page.get("url")
+        and not _is_placeholder_page(page)
     ]
     relevant_pages = _select_relevant_pages(pages, crop_rects)
 
@@ -539,7 +555,7 @@ def cache_relevant_pages(
     for page in relevant_pages:
         page_number = page.get("number", "unknown")
         out_path = out_dir / f"page_{page_number}.jpg"
-        response = conn.session.get(page["url"])
+        response = conn.session.get(_normalize_url(page["url"]))
         response.raise_for_status()
         with open(out_path, "wb") as handle:
             handle.write(response.content)
