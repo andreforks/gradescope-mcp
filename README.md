@@ -25,7 +25,7 @@ Built for **instructors and TAs** who want to use AI agents (Claude, Gemini, etc
 | `tool_modify_assignment_dates` | Change assignment dates |
 | `tool_rename_assignment` | Rename an assignment |
 | `tool_get_assignment_submissions` | View all submissions |
-| `tool_get_student_submission` | Get a student's submission content (text + image URLs + scanned PDF pages) |
+| `tool_get_student_submission` | Get a student's submission content (text + image URLs + scanned PDF pages, supports Online Assignments) |
 | `tool_get_assignment_graders` | View graders for a question |
 
 #### Grading — Read
@@ -34,9 +34,10 @@ Built for **instructors and TAs** who want to use AI agents (Claude, Gemini, etc
 | `tool_get_assignment_outline` | Question hierarchy with IDs, weights, and text |
 | `tool_export_assignment_scores` | Per-question scores + summary statistics |
 | `tool_get_grading_progress` | Per-question grading dashboard |
-| `tool_get_submission_grading_context` | Full grading context: rubric items, score, comments, navigation. Supports JSON output. |
+| `tool_get_submission_grading_context` | Full grading context: student text answer, rubric items, score, comments, navigation. Supports JSON output. |
+| `tool_get_question_rubric` | Get rubric items for a question without needing a submission ID |
 | `tool_prepare_grading_artifact` | Save prompt/rubric/reference notes to `/tmp` for context-efficient grading |
-| `tool_assess_submission_readiness` | Crop-first read plan + confidence gate for auto-grading |
+| `tool_assess_submission_readiness` | Crop-first read plan + readiness gate for auto-grading |
 | `tool_cache_relevant_pages` | Download crop page and adjacent pages to `/tmp` for local/vision review |
 | `tool_prepare_answer_key` | Cache an assignment-wide answer key to `/tmp` for repeated grading |
 | `tool_smart_read_submission` | Return a tiered crop/full-page/adjacent-page reading plan |
