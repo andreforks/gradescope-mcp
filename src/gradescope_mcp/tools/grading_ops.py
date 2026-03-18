@@ -283,24 +283,58 @@ def get_question_rubric(course_id: str, question_id: str) -> str:
 
     try:
         conn = get_connection()
-        # Find any submission for this question
-        url = (
+        ctx = None
+
+        # Path 1: submissions page
+        url1 = (
             f"{conn.gradescope_base_url}/courses/{course_id}"
             f"/questions/{question_id}/submissions"
         )
-        resp = conn.session.get(url)
-        if resp.status_code != 200:
-            return f"Error: Cannot access submissions for question `{question_id}` (status {resp.status_code})."
+        resp = conn.session.get(url1)
+        if resp.status_code == 200:
+            match = re.search(
+                rf"/courses/{course_id}/questions/{question_id}/submissions/(\d+)/grade",
+                resp.text,
+            )
+            if match:
+                ctx = _get_grading_context(course_id, question_id, match.group(1))
 
-        match = re.search(
-            rf"/courses/{course_id}/questions/{question_id}/submissions/(\d+)/grade",
-            resp.text,
-        )
-        if not match:
-            return f"No submissions found for question `{question_id}`. Rubric may not exist yet."
+        # Path 2: grade page (may redirect to a specific submission)
+        if ctx is None:
+            url2 = (
+                f"{conn.gradescope_base_url}/courses/{course_id}"
+                f"/questions/{question_id}/grade"
+            )
+            resp2 = conn.session.get(url2, allow_redirects=True)
+            if resp2.status_code == 200:
+                sub_match = re.search(
+                    rf"/questions/{question_id}/submissions/(\d+)",
+                    resp2.url,
+                )
+                if sub_match:
+                    ctx = _get_grading_context(
+                        course_id, question_id, sub_match.group(1)
+                    )
+                else:
+                    # Check if the page itself has SubmissionGrader props
+                    from bs4 import BeautifulSoup
+                    soup = BeautifulSoup(resp2.text, "html.parser")
+                    grader = soup.find(attrs={"data-react-class": "SubmissionGrader"})
+                    if grader:
+                        import json as _json
+                        props = _json.loads(grader.get("data-react-props", "{}"))
+                        rubric_items = props.get("rubric_items", [])
+                        if rubric_items:
+                            question = props.get("question", {})
+                            ctx = {"props": props}
 
-        sub_id = match.group(1)
-        ctx = _get_grading_context(course_id, question_id, sub_id)
+        if ctx is None:
+            return (
+                f"No submissions found for question `{question_id}`. "
+                "Cannot access rubric. The question may be in a special "
+                "assignment type. Try using `get_submission_grading_context` "
+                "with a known Question Submission ID instead."
+            )
     except AuthError as e:
         return f"Authentication error: {e}"
     except ValueError as e:

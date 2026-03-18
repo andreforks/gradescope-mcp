@@ -133,11 +133,13 @@ def get_answer_groups(
         return json.dumps(result, indent=2)
 
     # Markdown output
+    ag_type = question.get('assisted_grading_type') or '(not set)'
+    group_word = 'group' if len(groups) == 1 else 'groups'
     lines = [
         f"## Answer Groups — {question.get('numbered_title', question_id)}",
-        f"**Type:** {question.get('assisted_grading_type', 'unknown')}",
+        f"**Type:** {ag_type}",
         f"**Status:** {status}",
-        f"**Total:** {len(submissions)} submissions across {len(groups)} groups"
+        f"**Total:** {len(submissions)} submissions across {len(groups)} {group_word}"
         + (f" + {len(ungrouped)} ungrouped" if ungrouped else ""),
         "",
         "| # | Group ID | Title | Size | Graded | Hidden |",

@@ -283,9 +283,18 @@ def get_assignment_graders(course_id: str, question_id: str) -> str:
     if not graders:
         return f"No graders found for question `{question_id}` in course `{course_id}`."
 
-    # Filter: some question types return raw user IDs instead of names
-    named_graders = [g for g in graders if not str(g).isdigit()]
+    # Filter: some question types return raw user IDs or internal labels
+    _DIRTY_GRADER_PATTERNS = {"(needs labeling)", "(none)", "(unassigned)"}
+    named_graders = [
+        g for g in graders
+        if not str(g).isdigit()
+        and str(g).lower().strip() not in _DIRTY_GRADER_PATTERNS
+    ]
     id_only = [g for g in graders if str(g).isdigit()]
+    dirty_labels = [
+        g for g in graders
+        if str(g).lower().strip() in _DIRTY_GRADER_PATTERNS
+    ]
 
     lines = [
         f"## Graders for Question {question_id}\n",
@@ -294,9 +303,10 @@ def get_assignment_graders(course_id: str, question_id: str) -> str:
     for grader in sorted(named_graders):
         lines.append(f"- {grader}")
 
-    if id_only:
-        lines.append(f"\n⚠️ **Note:** {len(id_only)} grader(s) returned as numeric IDs "
-                      f"({', '.join(str(x) for x in id_only[:5])}), which may indicate "
-                      "system/auto-grader entries or a display issue.")
+    if id_only or dirty_labels:
+        extras = id_only + dirty_labels
+        lines.append(f"\n⚠️ **Note:** {len(extras)} grader entry(ies) filtered out: "
+                      f"{', '.join(str(x) for x in extras[:5])}. "
+                      "These may be system/auto-grader entries or internal labels.")
 
     return "\n".join(lines)

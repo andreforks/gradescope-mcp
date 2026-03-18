@@ -260,6 +260,14 @@ def _compute_readiness(
     elif len(pages) >= 5:
         reasons.append("Many pages increase the chance of cross-page spillover.")
 
+    # Penalties for complex submissions
+    if any((rect.get("y2", 0) - rect.get("y1", 0)) > 30 for rect in crop_rects):
+        reasons.append("Large crop height suggests the answer may span more than one logical block.")
+        score -= 0.05
+    if len(pages) >= 8:
+        reasons.append("This submission has many scanned pages, so cross-page spillover is more likely.")
+        score -= 0.05
+
     bounded = max(0.0, min(score, 0.95))
     if bounded >= 0.8:
         action = "ready"
@@ -466,21 +474,6 @@ def assess_submission_readiness(
         "2. If the crop looks truncated or handwriting crosses the border, read the whole page.",
         "3. If the reasoning still looks incomplete, inspect the previous and next page.",
     ]
-
-    # Heuristic: big crop or multi-page scanned submissions deserve caution.
-    if any((rect.get("y2", 0) - rect.get("y1", 0)) > 30 for rect in crop_rects):
-        reasons.append("Large crop height suggests the answer may span more than one logical block.")
-        readiness = max(0.0, readiness - 0.05)
-    if page_count >= 8:
-        reasons.append("This submission has many scanned pages, so cross-page spillover is more likely.")
-        readiness = max(0.0, readiness - 0.05)
-
-    if readiness < 0.55:
-        action = "not_ready"
-    elif readiness < 0.8:
-        action = "partially_ready"
-    else:
-        action = "ready"
 
     lines = [
         f"## Readiness Assessment — {question_label}",
