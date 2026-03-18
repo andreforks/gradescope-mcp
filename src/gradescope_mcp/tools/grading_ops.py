@@ -124,6 +124,23 @@ def get_submission_grading_context(
     answer_group_size = props.get("answer_group_size")
     groups_present = props.get("groups_present", False)
 
+    # Extract text answer (for online assignments)
+    answers_data = submission.get("answers", {})
+    text_content = []
+    if isinstance(answers_data, dict):
+        for key, val in answers_data.items():
+            if isinstance(val, str):
+                text_content.append(val)
+            elif isinstance(val, list):
+                for item in val:
+                    if isinstance(item, str):
+                        text_content.append(item)
+                    elif isinstance(item, dict) and "text_file_id" in item:
+                        text_content.append(f"[Uploaded file ID: {item['text_file_id']}]")
+                    else:
+                        text_content.append(str(item))
+    text_answer = "\n".join(text_content).strip() if text_content else None
+
     # Pages
     pages = props.get("pages", [])
     parameters = question.get("parameters") or {}
@@ -141,6 +158,7 @@ def get_submission_grading_context(
             "graded": submission.get("graded", False),
             "point_adjustment": evaluation.get("points"),
             "comments": evaluation.get("comments", ""),
+            "text_answer": text_answer,
             "rubric_items": [
                 {
                     "id": str(ri["id"]),
@@ -162,6 +180,7 @@ def get_submission_grading_context(
                 "size": answer_group_size,
                 "groups_present": groups_present,
             } if groups_present else None,
+
             "pages": [
                 {"number": p.get("number"), "url": p.get("url")}
                 for p in pages if isinstance(p, dict) and p.get("url")
@@ -193,6 +212,10 @@ def get_submission_grading_context(
     # Answer group
     if groups_present and answer_group_id:
         lines.append(f"\n**Answer Group:** `{answer_group_id}` ({answer_group_size} in group)")
+
+    if text_answer:
+        lines.append(f"\n### Student Answer")
+        lines.append(f"{text_answer}")
 
     if rubric_items:
         lines.append(f"\n### Rubric Items ({len(rubric_items)})")
