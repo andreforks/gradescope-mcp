@@ -4,6 +4,11 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 
 Built for **instructors and TAs** who want to use AI agents (Claude, Gemini, etc.) for grading workflows.
 
+This repository now also includes a reusable grading skill at
+[`skills/gradescope-assisted-grading/SKILL.md`](skills/gradescope-assisted-grading/SKILL.md)
+that documents a human-approved grading workflow for scanned exams, rubric review,
+batch grading, and individual grading.
+
 ## Features
 
 ### Tools (32 total)
@@ -125,11 +130,72 @@ Add to your MCP client configuration (e.g., Claude Desktop `claude_desktop_confi
 npx @modelcontextprotocol/inspector uv run python -m gradescope_mcp
 ```
 
+## Assisted Grading Skill
+
+The repository includes one local skill:
+
+- `gradescope-assisted-grading`
+
+What it does:
+- Defines a preview-first grading workflow for this MCP server
+- Treats rubric mutations and grade writes as human-approved actions
+- Handles scanned PDF / handwritten assignments where structured reference answers may be missing
+- Supports user-provided reference answers saved to `/tmp` during a grading run
+
+### Install The Skill
+
+Project-local `SKILL.md` files are not automatically discovered by most clients. To make this skill available, copy or symlink the skill folder into whatever skills directory your agent or client is configured to scan.
+
+Recommended install target: project-local `.agent/skills`
+
+```bash
+mkdir -p .agent/skills
+ln -s "$(pwd)/skills/gradescope-assisted-grading" .agent/skills/gradescope-assisted-grading
+```
+
+If you prefer copying instead of symlinking:
+
+```bash
+mkdir -p .agent/skills
+cp -R skills/gradescope-assisted-grading .agent/skills/
+```
+
+Alternative: user-level skills directory
+
+```bash
+mkdir -p ~/.agent/skills
+ln -s /path/to/gradescope-mcp/skills/gradescope-assisted-grading ~/.agent/skills/gradescope-assisted-grading
+```
+
+After installation, restart your client session if needed so it re-scans the available skills.
+
+### Verify Installation
+
+Confirm the skill is installed:
+
+```bash
+ls .agent/skills/gradescope-assisted-grading
+cat .agent/skills/gradescope-assisted-grading/SKILL.md
+```
+
+Then invoke it from your client by name, for example:
+
+- `Use the gradescope-assisted-grading skill`
+- `$gradescope-assisted-grading`
+
+Important:
+- Keep the skill folder name and the `name:` field in `SKILL.md` aligned.
+- Prefer `.agent/skills` for project-local workflows and `~/.agent/skills` for user-wide installation.
+- A symlink is usually better during development because updates in this repo are reflected immediately.
+
 ## Project Structure
 ```
 gradescope-mcp/
 ├── pyproject.toml
 ├── .env.example
+├── skills/
+│   └── gradescope-assisted-grading/
+│       └── SKILL.md        # Human-approved grading workflow for agents
 ├── src/gradescope_mcp/
 │   ├── __init__.py
 │   ├── __main__.py          # Entry point
@@ -165,11 +231,18 @@ Key read tools (`get_submission_grading_context`, `get_answer_groups`, `get_answ
 ### Smart Reading Strategy
 For scanned exams, the server provides a tiered reading plan: crop region first, full page if overflow detected, adjacent pages if answer spans boundaries. A confidence score guides whether the agent should auto-grade, request review, or skip.
 
+### Human-Approved Writes
+The intended grading workflow is agent-assisted, not blind full automation. Agents can read questions, draft reference answers, propose rubric changes, preview grades, and prepare batch grading actions, but rubric mutations and grade writes should be executed only after explicit human approval.
+
+### Reference Answer Behavior
+For scanned PDF / handwritten assignments, missing structured reference answers are expected. In these cases, the agent should rely on the prompt, rubric, scanned pages, and optionally user-provided model answers saved to `/tmp`.
+
 ## Security
 - Credentials are loaded from environment variables only
 - `.env` is gitignored
 - Uploads require absolute file paths
 - All write-capable tools require `confirm_write=True`
+- Some Gradescope endpoints, such as extensions, may behave differently across assignment types; unsupported exam-style endpoints should not block grading workflows
 
 ## Testing
 ```bash
