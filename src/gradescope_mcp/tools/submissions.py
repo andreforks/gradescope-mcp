@@ -100,8 +100,8 @@ def upload_submission(
 def get_assignment_submissions(course_id: str, assignment_id: str) -> str:
     """Get all submissions for an assignment (instructor/TA only).
 
-    Returns a list of submission IDs and their file links.
-    Note: This makes one request per submission and may be slow for large classes.
+    Works for all assignment types including scanned PDF/image-only exams.
+    Returns submission IDs, graded status, and grading progress.
 
     Args:
         course_id: The Gradescope course ID.
@@ -112,23 +112,48 @@ def get_assignment_submissions(course_id: str, assignment_id: str) -> str:
 
     try:
         conn = get_connection()
-        submissions = conn.account.get_assignment_submissions(course_id, assignment_id)
+        # Use the submissions.json endpoint directly — the gradescopeapi library
+        # raises NotImplementedError for image-only / scanned PDF assignments.
+        resp = conn.session.get(
+            f"{conn.gradescope_base_url}/courses/{course_id}"
+            f"/assignments/{assignment_id}/submissions.json",
+            headers={
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+        )
+        if resp.status_code != 200:
+            return f"Error: Cannot access submissions (status {resp.status_code})."
+
+        data = resp.json()
     except AuthError as e:
         return f"Authentication error: {e}"
     except Exception as e:
         return f"Error fetching submissions: {e}"
 
-    if not submissions:
+    detailed = data.get("detailed_submissions", {})
+    basic = data.get("submissions", {})
+
+    if not detailed and not basic:
         return f"No submissions found for assignment `{assignment_id}` in course `{course_id}`."
 
-    lines = [f"## Submissions for Assignment {assignment_id}\n"]
-    lines.append(f"**Total submissions:** {len(submissions)}\n")
-    lines.append("| # | Submission ID | Files |")
-    lines.append("|---|---------------|-------|")
+    # Prefer detailed_submissions (has grading progress), fall back to basic
+    subs = detailed or basic
+    total = len(subs)
+    graded = sum(1 for s in subs.values() if s.get("graded"))
 
-    for i, (sub_id, links) in enumerate(submissions.items(), 1):
-        file_count = len(links) if links else 0
-        lines.append(f"| {i} | `{sub_id}` | {file_count} file(s) |")
+    lines = [f"## Submissions for Assignment {assignment_id}\n"]
+    lines.append(f"**Total submissions:** {total}")
+    lines.append(f"**Graded:** {graded}/{total}\n")
+    lines.append("| # | Submission ID | Graded | Progress | Late |")
+    lines.append("|---|---------------|--------|----------|------|")
+
+    for i, (sub_id, sub) in enumerate(sorted(subs.items(), key=lambda x: x[0]), 1):
+        is_graded = "✅" if sub.get("graded") else "—"
+        progress = sub.get("grading_progress")
+        progress_str = f"{progress:.0f}%" if progress is not None else "—"
+        late = "⚠️" if sub.get("late") else ""
+        lines.append(f"| {i} | `{sub_id}` | {is_graded} | {progress_str} | {late} |")
 
     return "\n".join(lines)
 
