@@ -326,3 +326,169 @@ def test_positive_scoring_context_shows_add_hint(monkeypatch) -> None:
     assert "Rubric items **add** points" in result
     assert "deduct" not in result.lower()
 
+
+def test_get_next_ungraded_falls_back_to_submission_listing_when_nav_is_empty(monkeypatch) -> None:
+    monkeypatch.setattr(
+        grading_ops,
+        "_get_grading_context",
+        lambda *_args, **_kwargs: {
+            "props": {
+                "submission": {"id": "99", "graded": True},
+                "navigation_urls": {},
+                "num_graded_submissions": 4,
+                "num_submissions": 5,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        grading_ops,
+        "_fetch_question_submission_entries",
+        lambda *_args, **_kwargs: [
+            {"submission_id": "90", "student_name": "A", "graded": True},
+            {"submission_id": "99", "student_name": "B", "graded": True},
+            {"submission_id": "105", "student_name": "C", "graded": False},
+        ],
+    )
+    monkeypatch.setattr(
+        grading_ops,
+        "get_submission_grading_context",
+        lambda course_id, question_id, submission_id, output_format="markdown": (
+            f"CTX {course_id} {question_id} {submission_id} {output_format}"
+        ),
+    )
+
+    result = grading_ops.get_next_ungraded("1", "2", "99", output_format="json")
+
+    assert result == "CTX 1 2 105 json"
+
+
+def test_list_question_submissions_ungraded_filter_excludes_integer_scored_rows(
+    monkeypatch,
+) -> None:
+    submissions_html = """
+    <table>
+      <tr>
+        <td>Alice Example</td>
+        <td>5</td>
+        <td><a href="/courses/1/questions/2/submissions/101/grade">grade</a></td>
+      </tr>
+      <tr>
+        <td>Bob Example</td>
+        <td>—</td>
+        <td><a href="/courses/1/questions/2/submissions/102/grade">grade</a></td>
+      </tr>
+    </table>
+    """
+    monkeypatch.setattr(
+        grading_ops,
+        "get_connection",
+        lambda: SimpleNamespace(
+            gradescope_base_url="https://example.com",
+            session=SimpleNamespace(
+                get=lambda *_args, **_kwargs: SimpleNamespace(
+                    status_code=200,
+                    text=submissions_html,
+                )
+            ),
+        ),
+    )
+
+    result = json.loads(grading_ops.list_question_submissions("1", "2", filter="ungraded"))
+
+    assert [sub["submission_id"] for sub in result["submissions"]] == ["102"]
+
+
+def test_graded_heuristic_matches_fractional_and_integer_scores(monkeypatch) -> None:
+    """The heuristic should detect N/N scores, integer scores, and not false-positive on names."""
+    submissions_html = """
+    <table>
+      <tr>
+        <td>Alice 3rd</td>
+        <td>8/10</td>
+        <td><a href="/courses/1/questions/2/submissions/201/grade">grade</a></td>
+      </tr>
+      <tr>
+        <td>Bob Example</td>
+        <td>5</td>
+        <td><a href="/courses/1/questions/2/submissions/202/grade">grade</a></td>
+      </tr>
+      <tr>
+        <td>Carol Example</td>
+        <td>—</td>
+        <td><a href="/courses/1/questions/2/submissions/203/grade">grade</a></td>
+      </tr>
+      <tr>
+        <td>Dave 42nd</td>
+        <td></td>
+        <td><a href="/courses/1/questions/2/submissions/204/grade">grade</a></td>
+      </tr>
+    </table>
+    """
+    monkeypatch.setattr(
+        grading_ops,
+        "get_connection",
+        lambda: SimpleNamespace(
+            gradescope_base_url="https://example.com",
+            session=SimpleNamespace(
+                get=lambda *_args, **_kwargs: SimpleNamespace(
+                    status_code=200,
+                    text=submissions_html,
+                )
+            ),
+        ),
+    )
+
+    entries = grading_ops._fetch_question_submission_entries("1", "2")
+    graded_map = {e["submission_id"]: e["graded"] for e in entries}
+
+    # "8/10" → graded
+    assert graded_map["201"] is True
+    # "5" → graded (integer score)
+    assert graded_map["202"] is True
+    # "—" → not graded
+    assert graded_map["203"] is False
+    # empty → not graded (name "Dave 42nd" must not false-positive)
+    assert graded_map["204"] is False
+
+
+def test_get_next_ungraded_uses_props_sid_after_auto_discovery(monkeypatch) -> None:
+    """After auto-discovery, current_sid should come from props, not the stale input."""
+    call_log = []
+
+    def fake_get_grading_context(course_id, question_id, submission_id):
+        call_log.append(("ctx", submission_id))
+        if submission_id == "GLOBAL_99999":
+            raise ValueError("404 Not Found")
+        return {
+            "props": {
+                "submission": {"id": "200", "graded": True},
+                "navigation_urls": {
+                    # next_ungraded points to a different sid than the discovered one
+                    "next_ungraded": f"/courses/{course_id}/questions/{question_id}/submissions/300/grade",
+                },
+                "num_graded_submissions": 4,
+                "num_submissions": 5,
+            }
+        }
+
+    monkeypatch.setattr(grading_ops, "_get_grading_context", fake_get_grading_context)
+    monkeypatch.setattr(
+        grading_ops,
+        "_find_question_submission_id",
+        lambda *_args, **_kwargs: "200",
+    )
+    monkeypatch.setattr(
+        grading_ops,
+        "get_submission_grading_context",
+        lambda course_id, question_id, submission_id, output_format="markdown": (
+            f"CTX {course_id} {question_id} {submission_id} {output_format}"
+        ),
+    )
+
+    # Pass a global submission ID that will 404
+    result = grading_ops.get_next_ungraded("1", "2", "GLOBAL_99999", output_format="json")
+
+    # next_ungraded points to 300, which is different from props sid 200,
+    # so it should navigate to 300
+    assert result == "CTX 1 2 300 json"
+

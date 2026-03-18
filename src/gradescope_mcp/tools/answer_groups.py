@@ -26,6 +26,23 @@ from gradescope_mcp.tools.safety import write_confirmation_required
 logger = logging.getLogger(__name__)
 
 
+def _partition_group_submissions(
+    submissions: list[dict[str, Any]],
+    group_id: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split a group's members into confirmed and inferred submissions."""
+    confirmed = [
+        s for s in submissions
+        if str(s.get("confirmed_group_id")) == str(group_id)
+    ]
+    inferred = [
+        s for s in submissions
+        if str(s.get("confirmed_group_id")) != str(group_id)
+        and str(s.get("unconfirmed_group_id")) == str(group_id)
+    ]
+    return confirmed, inferred
+
+
 def _fetch_answer_groups_json(
     course_id: str, question_id: str
 ) -> dict[str, Any]:
@@ -94,13 +111,20 @@ def get_answer_groups(
     # Count submissions per group
     group_counts: dict[int, dict[str, int]] = {}
     for sub in submissions:
-        gid = sub.get("confirmed_group_id") or sub.get("unconfirmed_group_id")
-        if gid is not None:
-            if gid not in group_counts:
-                group_counts[gid] = {"total": 0, "graded": 0}
-            group_counts[gid]["total"] += 1
+        confirmed_gid = sub.get("confirmed_group_id")
+        inferred_gid = sub.get("unconfirmed_group_id")
+
+        if confirmed_gid is not None:
+            if confirmed_gid not in group_counts:
+                group_counts[confirmed_gid] = {"total": 0, "graded": 0, "inferred": 0}
+            group_counts[confirmed_gid]["total"] += 1
             if sub.get("graded"):
-                group_counts[gid]["graded"] += 1
+                group_counts[confirmed_gid]["graded"] += 1
+
+        if inferred_gid is not None and inferred_gid != confirmed_gid:
+            if inferred_gid not in group_counts:
+                group_counts[inferred_gid] = {"total": 0, "graded": 0, "inferred": 0}
+            group_counts[inferred_gid]["inferred"] += 1
 
     # Count ungrouped
     ungrouped = [
@@ -109,6 +133,9 @@ def get_answer_groups(
     ]
 
     if output_format == "json":
+        manual_grouping_recommended = (
+            question.get("assisted_grading_type") == "not_grouped" or len(groups) == 0
+        )
         result = {
             "question_id": question_id,
             "question_title": question.get("numbered_title", ""),
@@ -117,16 +144,22 @@ def get_answer_groups(
             "num_groups": len(groups),
             "num_submissions": len(submissions),
             "num_ungrouped": len(ungrouped),
+            "grouping_available": len(groups) > 0,
+            "manual_grouping_recommended": manual_grouping_recommended,
+            "recommended_strategy": (
+                "manual_sampling" if manual_grouping_recommended else "answer_groups"
+            ),
             "groups": [],
         }
         for g in groups:
             gid = g["id"]
-            counts = group_counts.get(gid, {"total": 0, "graded": 0})
+            counts = group_counts.get(gid, {"total": 0, "graded": 0, "inferred": 0})
             result["groups"].append({
                 "id": str(gid),
                 "title": g.get("title", ""),
                 "size": counts["total"],
                 "graded": counts["graded"],
+                "inferred": counts["inferred"],
                 "hidden": g.get("hidden", False),
                 "question_type": g.get("question_type", ""),
             })
@@ -153,7 +186,7 @@ def get_answer_groups(
 
     for i, g in enumerate(groups, 1):
         gid = g["id"]
-        counts = group_counts.get(gid, {"total": 0, "graded": 0})
+        counts = group_counts.get(gid, {"total": 0, "graded": 0, "inferred": 0})
         title = g.get("title", "(untitled)")
         # Truncate long LaTeX titles
         if len(title) > 60:
@@ -164,9 +197,19 @@ def get_answer_groups(
         lines.append(
             f"| {i} | `{gid}` | {title} | {g_type} | {counts['total']} | {graded_str} | {hidden} |"
         )
+        if counts["inferred"]:
+            lines.append(
+                f"|   |  | inferred members excluded from batch writes |  | +{counts['inferred']} |  |  |"
+            )
 
     if ungrouped:
         lines.append(f"\n**Ungrouped:** {len(ungrouped)} submissions need manual grouping")
+    if question.get("assisted_grading_type") == "not_grouped" or len(groups) == 0:
+        lines.append(
+            "\n**Recommendation:** Gradescope has no usable answer groups for this "
+            "question. Fall back to manual sampling with "
+            "`tool_list_question_submissions` and build your own grouping plan."
+        )
 
     return "\n".join(lines)
 
@@ -215,51 +258,60 @@ def get_answer_group_detail(
         return f"Error: group `{group_id}` not found. Use get_answer_groups to list available groups."
 
     # Filter submissions in this group
-    group_subs = [
-        s for s in submissions
-        if str(s.get("confirmed_group_id")) == str(group_id)
-        or str(s.get("unconfirmed_group_id")) == str(group_id)
-    ]
+    confirmed_subs, inferred_subs = _partition_group_submissions(submissions, group_id)
 
     if output_format == "json":
+        def _sub_entry(s: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "submission_id": str(s["id"]),
+                "assignment_submission_id": str(s.get("assignment_submission_id", "")),
+                "graded": s.get("graded", False),
+                "graded_individually": s.get("graded_individually", False),
+                "inferred_answer": s.get("inferred_answer"),
+                "masked_crop": s.get("masked_crop"),
+            }
+
         result = {
             "group_id": str(group_id),
             "title": target_group.get("title", ""),
             "question_type": target_group.get("question_type", ""),
             "hidden": target_group.get("hidden", False),
-            "size": len(group_subs),
-            "graded_count": sum(1 for s in group_subs if s.get("graded")),
-            "submissions": [
-                {
-                    "submission_id": str(s["id"]),
-                    "assignment_submission_id": str(s.get("assignment_submission_id", "")),
-                    "graded": s.get("graded", False),
-                    "graded_individually": s.get("graded_individually", False),
-                    "confirmed": str(s.get("confirmed_group_id")) == str(group_id),
-                    "inferred_answer": s.get("inferred_answer"),
-                    "masked_crop": s.get("masked_crop"),
-                }
-                for s in group_subs
-            ],
+            "size": len(confirmed_subs),
+            "inferred_count": len(inferred_subs),
+            "graded_count": sum(
+                1 for s in confirmed_subs + inferred_subs if s.get("graded")
+            ),
+            "submissions": [_sub_entry(s) for s in confirmed_subs],
+            "inferred_submissions": [_sub_entry(s) for s in inferred_subs],
         }
+        if inferred_subs:
+            result["inferred_warning"] = (
+                f"Gradescope's save_many_grades endpoint may also apply the "
+                f"grade to {len(inferred_subs)} inferred (unconfirmed) member(s). "
+                f"Review the inferred_submissions list before batch grading."
+            )
         return json.dumps(result, indent=2)
 
     # Markdown output
+    group_subs = confirmed_subs + inferred_subs
     graded_count = sum(1 for s in group_subs if s.get("graded"))
-    confirmed_count = sum(
-        1 for s in group_subs
-        if str(s.get("confirmed_group_id")) == str(group_id)
-    )
 
     lines = [
         f"## Answer Group Detail — `{group_id}`",
         f"**Title:** {target_group.get('title', '(untitled)')}",
         f"**Type:** {target_group.get('question_type', 'unknown')}",
-        f"**Size:** {len(group_subs)} submissions ({confirmed_count} confirmed, "
-        f"{len(group_subs) - confirmed_count} inferred)",
+        f"**Confirmed:** {len(confirmed_subs)} submissions",
+        f"**Inferred:** {len(inferred_subs)} submissions",
         f"**Graded:** {graded_count}/{len(group_subs)}",
         "",
     ]
+    if inferred_subs:
+        lines.append(
+            "⚠️ **Warning:** This group has inferred (unconfirmed) members. "
+            "`save_many_grades` may apply the grade to them as well. "
+            "Review the inferred members before batch grading."
+        )
+        lines.append("")
 
     # Show representative crops
     crops_shown = 0
@@ -331,7 +383,15 @@ def grade_answer_group(
     if isinstance(rubric_item_ids, str):
         rubric_item_ids = [rubric_item_ids]
 
-    if rubric_item_ids is None and point_adjustment is None and comment is None:
+    if rubric_item_ids is None:
+        return (
+            "Error: rubric_item_ids must be explicitly specified for batch grading. "
+            "Passing None would inherit the sample submission's rubric state and "
+            "propagate it to the entire group. Use get_answer_group_detail to "
+            "inspect the group, then provide the exact rubric item IDs to apply."
+        )
+
+    if not rubric_item_ids and point_adjustment is None and comment is None:
         return "Error: at least one of rubric_item_ids, point_adjustment, or comment must be provided."
 
     try:
@@ -339,11 +399,9 @@ def grade_answer_group(
 
         # Get answer groups data for group size info
         ag_data = _fetch_answer_groups_json(course_id, question_id)
-        group_subs = [
-            s for s in ag_data.get("submissions", [])
-            if str(s.get("confirmed_group_id")) == str(group_id)
-            or str(s.get("unconfirmed_group_id")) == str(group_id)
-        ]
+        group_subs, inferred_subs = _partition_group_submissions(
+            ag_data.get("submissions", []), group_id
+        )
         target_group = None
         for g in ag_data.get("groups", []):
             if str(g["id"]) == str(group_id):
@@ -386,10 +444,14 @@ def grade_answer_group(
             f"question_id=`{question_id}`",
             f"group_id=`{group_id}`",
             f"group_title={target_group.get('title', '?')}",
-            f"group_size={len(group_subs)} submissions",
+            f"group_size={len(group_subs)} confirmed submissions",
         ]
-        if rubric_item_ids is not None:
-            details.append(f"rubric_item_ids={sorted(rubric_item_ids)}")
+        if inferred_subs:
+            details.append(
+                f"⚠️ inferred_members={len(inferred_subs)} — "
+                f"save_many_grades may also apply to these unconfirmed members"
+            )
+        details.append(f"rubric_item_ids={sorted(rubric_item_ids)}")
         if point_adjustment is not None:
             details.append(f"point_adjustment={point_adjustment}")
         if comment is not None:
@@ -414,14 +476,10 @@ def grade_answer_group(
             )
 
     # Build JSON payload matching what the Gradescope frontend sends.
+    # SAFETY: rubric_item_ids=None was already rejected above.
+    # We never inherit current_evals from the sample submission.
     rubric_items = props.get("rubric_items", [])
-    current_evals = props.get("rubric_item_evaluations", [])
-    current_eval = props.get("evaluation", {})
-
-    if rubric_item_ids is not None:
-        apply_ids = set(str(rid) for rid in rubric_item_ids)
-    else:
-        apply_ids = {str(e["rubric_item_id"]) for e in current_evals if e.get("present")}
+    apply_ids = set(str(rid) for rid in rubric_item_ids)
 
     rubric_items_payload = {}
     for ri in rubric_items:
@@ -430,21 +488,17 @@ def grade_answer_group(
             "score": "true" if rid in apply_ids else "false"
         }
 
-    resolved_points = (
-        point_adjustment if point_adjustment is not None
-        else current_eval.get("points")
-    )
-    resolved_comments = (
-        comment if comment is not None
-        else current_eval.get("comments")
-    )
+    # SAFETY: Never inherit points/comments from the sample submission's
+    # current_eval. Only include values the caller explicitly provided.
+    evaluation_payload: dict[str, Any] = {}
+    if point_adjustment is not None:
+        evaluation_payload["points"] = point_adjustment
+    if comment is not None:
+        evaluation_payload["comments"] = comment
 
     json_payload = {
         "rubric_items": rubric_items_payload,
-        "question_submission_evaluation": {
-            "points": resolved_points,
-            "comments": resolved_comments,
-        },
+        "question_submission_evaluation": evaluation_payload,
     }
 
     headers = {

@@ -11,13 +11,16 @@ Use this skill when grading through the Gradescope MCP server. The workflow is a
 
 - Preview first. For every write-capable tool, call it once with `confirm_write=False` before any mutation.
 - Approval before execution. Only call `confirm_write=True` after the user explicitly approves that exact action.
+- Rubric deletion/edit approval must be explicit. Never delete or modify a rubric item unless the user has specifically approved that exact rubric change after seeing its impact, because rubric mutations can retroactively change previously graded submissions.
 - Read before grading. Never grade without reading the student's actual work or an answer-group sample that is clearly representative.
 - Skip ambiguity. If the grade is not precise and defensible, skip and flag for human review.
 - Preserve user authority. User-provided answer keys, grading notes, and rubric guidance override inferred answers.
 - Prefer structured output. When a tool supports `output_format`, prefer `output_format="json"` for planning and decision-making.
-- Do not confuse "leave unchanged" with "clear". In `tool_apply_grade` and `tool_grade_answer_group`, `rubric_item_ids=None` means keep current rubric state, while `rubric_item_ids=[]` means clear all rubric items.
+- Do not confuse "leave unchanged" with "clear". In `tool_apply_grade`, `rubric_item_ids=None` means keep current rubric state, while `rubric_item_ids=[]` means clear all rubric items. In `tool_grade_answer_group`, `rubric_item_ids=None` is **rejected** — see "Batch writes must be explicit" below.
 - Default to deduction logic. Unless the question clearly indicates otherwise, assume the grading mindset is negative scoring: start from full credit, select rubric items for mistakes found. Rubric weights are always **positive numbers** — Gradescope's `scoring_type` determines whether items add or deduct.
 - Default to preserving existing grades. If a submission already appears graded, skip it unless the user explicitly asks for regrading, audit, or overwrite behavior.
+- Default to no submission-specific comment. Do not write `comment` / "Provide comments specific to this submission" unless the user explicitly wants comments, the grade uses a one-off `point_adjustment` that needs explanation, or a human-review note is necessary.
+- Batch writes must be explicit. In `tool_grade_answer_group`, always pass explicit `rubric_item_ids`. Never rely on `None` (keep current), because that would inherit one sample submission's rubric state and silently propagate it to the entire group. Similarly, pass `comment=None` and `point_adjustment=None` unless the user explicitly wants uniform values for those fields.
 
 ## When To Use
 
@@ -42,6 +45,11 @@ If the user does not provide IDs:
 - Call `tool_get_assignment_outline(course_id, assignment_id)`
 - Call `tool_get_grading_progress(course_id, assignment_id)`
 
+If the user gives a question URL or a bare `question_id` but no reliable `assignment_id`:
+- Start with `tool_prepare_grading_artifact(course_id, assignment_id="", question_id)` or `tool_assess_submission_readiness(...)`
+- Those workflow helpers may auto-resolve the owning assignment; capture and reuse the resolved `assignment_id` they report
+- Only fall back to manual `get_assignments` plus `get_assignment_outline` scanning if auto-resolution fails
+
 Record only leaf questions with non-zero weight. Skip questions that are already fully graded unless the user explicitly asks for regrading or audit work.
 
 For individual submissions that are already graded, skip them by default. Only re-grade previously graded submissions when:
@@ -52,11 +60,12 @@ For individual submissions that are already graded, skip them by default. Only r
 ### 2. Build The Grading Basis
 
 Call `tool_prepare_answer_key(course_id, assignment_id)` once per assignment and read the generated `/tmp/gradescope-answerkey-{assignment_id}.md`.
+Treat that file as a grading-basis cache, not automatically as a true answer key. For scanned assignments it may contain explicit "no instructor-provided reference answer" placeholders instead of real answers.
 
 Interpret the result carefully:
 - If the user directly provides reference answers, save them to a `/tmp` reference file and use that file as the primary grading reference for the rest of the run.
 - If structured reference answers exist, use them.
-- If reference answers are missing for scanned PDF or handwritten assignments, treat that as expected. Draft your own grading basis from the prompt, rubric, and subject knowledge.
+- If reference answers are missing for scanned PDF or handwritten assignments, treat that as expected. Do not hallucinate an answer key from the placeholder text; draft your own grading basis from the prompt, rubric, and subject knowledge.
 - Your self-authored reference answer is an internal grading aid, not ground truth. If the prompt, rubric, or instructor guidance conflicts with it, defer to the prompt and rubric.
 
 When the user provides reference answers:
@@ -104,6 +113,11 @@ Only after approval:
 - Call `tool_update_rubric_item(..., confirm_write=True)` for edits
 - Call `tool_delete_rubric_item(..., confirm_write=True)` only when removal is clearly necessary
 
+Special caution for edits and deletions:
+- Tell the user that updating or deleting a rubric item can retroactively alter previously graded work
+- Do not treat prior approval for grading as approval for rubric deletion or rubric rewrites
+- If the user wants the deletion because earlier grading was wrong, pause and clarify whether they want historical submissions reviewed after the rubric change
+
 After any rubric mutation:
 - Re-fetch the rubric with `tool_get_question_rubric`
 - Present the updated rubric back to the user for confirmation that the grading basis is now correct
@@ -112,6 +126,12 @@ After any rubric mutation:
 
 First check for answer groups:
 - Call `tool_get_answer_groups(course_id, question_id, output_format="json")`
+
+If the response shows `assisted_grading_type="not_grouped"` or `num_groups=0`:
+- Do not keep probing Gradescope answer groups
+- Switch immediately to manual grouping: call `tool_list_question_submissions(course_id, question_id, filter="ungraded")`
+- Sample a small set of submissions, identify repeated answer patterns yourself, and use that manual grouping only for planning or batched user review
+- Unless the evidence is extremely homogeneous, execute grades submission-by-submission rather than pretending there is a real Gradescope group
 
 Prefer batch grading when:
 - Answer groups exist and are readable
@@ -134,13 +154,23 @@ For each ungraded group:
 - If the detail view does not provide enough confidence that the whole group is homogeneous, do not batch grade that group
 - If the existing rubric does not precisely capture the group outcome, decide whether this is a reusable rubric gap or a one-off grading exception before assigning `point_adjustment`
 
+Inferred-member safety:
+- Check the `inferred_count` and `inferred_submissions` fields in the detail JSON.
+- Gradescope's `save_many_grades` endpoint may apply the grade to **both** confirmed and inferred (unconfirmed) group members. The client cannot filter this server-side.
+- If a group has any inferred members, tell the user in the preview and get explicit approval. If the inferred answers look different from the confirmed samples, do not batch grade that group.
+
+Explicit fields rule:
+- Always pass `rubric_item_ids` as an explicit list — the tool rejects `None` to prevent inheriting the sample submission's rubric state.
+- Default `comment=None` and `point_adjustment=None` to avoid propagating a single student's one-off values to the entire group.
+
 Preview the action:
 - Call `tool_grade_answer_group(..., confirm_write=False)`
 
 Then show the user:
 - Group ID and title
-- Group size
+- Group size (confirmed + inferred counts separately)
 - The rubric items you intend to apply
+- Whether inferred members exist and the server-side risk
 - Your justification
 - Your confidence
 
@@ -164,7 +194,9 @@ For each submission:
 
 Readiness-first rule:
 - If readiness is clearly low, do not spend additional tokens on OCR, full-page reading, or long analysis
-- Low-readiness submissions should be skipped or escalated unless the user specifically wants a manual deep read
+- Distinguish `missing structured context` from `ungradable`: scanned PDF questions may still be manually gradable from crop/page images plus rubric
+- If the question is scanned and the tool still provides crop/page evidence, run `tool_smart_read_submission` and perform a bounded manual read before skipping
+- Skip only when the handwriting, crop, or page evidence is still insufficient after that read
 
 Tiered reading order:
 1. Crop region only
@@ -189,7 +221,8 @@ If the answer is ambiguous:
 
 If the answer is gradable:
 - Decide `rubric_item_ids`
-- Add a concise comment
+- Leave `comment=None` by default
+- Only add a concise comment when it communicates something the rubric alone does not, such as a one-off adjustment rationale or a human-review handoff note
 - Set an honest confidence score
 - Ensure the selected rubric items match the question scoring mode:
   positive scoring means selected items add earned points
@@ -206,7 +239,7 @@ Show the user:
 - Student name and submission ID
 - Selected rubric items
 - Expected score impact
-- Comment
+- Comment, if any
 - Confidence
 
 Only after explicit approval:
@@ -231,6 +264,10 @@ For large classes (50+ submissions per question), per-submission approval is imp
    - "除了 #3，其余通过" → execute all except #3
    - "#3 改成 7 分" → adjust #3 and execute
 4. **Execute phase**: Call `tool_apply_grade(..., confirm_write=True)` only for approved entries.
+
+After each executed write in batch mode:
+- Re-fetch `tool_get_submission_grading_context(..., output_format="json")` for that submission before marking it completed in your summary
+- If the verified score/rubric state does not match the preview, stop the batch and report the mismatch
 
 Batch size: present 10–30 submissions per approval round. Do not ask the user to review 200 at once.
 
@@ -265,6 +302,7 @@ Decision rule:
 Adjustment discipline:
 - Every `point_adjustment` must include a concise reason explaining why the rubric alone was insufficient.
 - If similar adjustments appear repeatedly on the same question, stop using ad hoc adjustments and escalate for rubric review.
+- If that reason must be preserved in Gradescope, write it as the submission comment; otherwise keep it only in the approval summary.
 
 ### 6B. Subagent Delegation Policy
 
@@ -309,10 +347,19 @@ Subagent prompt contract should include:
 - The confidence threshold for skipping
 - Whether the subagent may execute writes or only preview them
 
+Subagent batch-boundary rule:
+- Treat the assigned submission list as immutable
+- If a subagent is interrupted, reused, or runs out of context, discard any unverified "done/skipped" summary for the unfinished tail of the batch
+- Reconstruct the remaining work from the original submission ID manifest plus fresh `tool_get_submission_grading_context` checks
+
 When a subagent finds rubric insufficiency:
 - If the issue is one-off, it may use `point_adjustment` with a specific reason
 - If the issue appears reusable or likely to recur, it must stop and return the case to the main agent for rubric review
 - If uncertainty is high, it must skip rather than compensate with an arbitrary adjustment
+
+Reporting rule:
+- Never report "skipped, not written" from memory alone after an interruption or agent handoff
+- Before emitting that status, verify the live state with `tool_get_submission_grading_context(..., output_format="json")`
 
 #### Cross-Agent Consensus — Deduplicating Rubric Gaps
 
@@ -380,6 +427,7 @@ Use this default order unless the user directs otherwise:
 
 - `AuthError`: stop and report immediately
 - `404` on a submission: re-orient with `tool_get_next_ungraded`; the caller may have used a global submission ID
+- If a subagent summary conflicts with Gradescope state, trust the live Gradescope readback, not the cached summary; rebuild the completion table from verified submission states
 - Repeated low-confidence or skipped cases on the same question: pause that question and ask for user guidance
 - If more than roughly 30% of a question's submissions are being skipped, stop auto-grading that question and escalate
 - If a preview shows an unintended empty rubric state, stop. That usually means `rubric_item_ids=[]` was passed when `None` was intended.

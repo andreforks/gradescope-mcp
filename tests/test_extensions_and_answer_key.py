@@ -59,8 +59,10 @@ def test_prepare_answer_key_reports_missing_reference_answers(monkeypatch) -> No
     artifact_path = pathlib.Path("/tmp/gradescope-answerkey-5030457.md")
     artifact_text = artifact_path.read_text(encoding="utf-8")
 
-    assert "✅ Answer key prepared for **Demo Exam**" in result
+    assert "✅ Grading basis prepared for **Demo Exam**" in result
+    assert "- Questions with instructor reference answers: 0" in result
     assert "- Missing reference answers: 2 (Q1, Q2)" in result
     assert "- **⚠️ Missing answers:** Q1, Q2" in artifact_text
-    assert artifact_text.count("No reference answer available for this question.") == 2
-    assert "scanned PDF / handwritten assignments" in artifact_text
+    assert artifact_text.startswith("# Grading Basis: Demo Exam")
+    assert artifact_text.count("No instructor-provided reference answer is available for this question.") == 2
+    assert "Do not treat this file as a true answer key here" in artifact_text

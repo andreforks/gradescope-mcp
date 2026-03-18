@@ -390,6 +390,137 @@ def get_question_rubric(course_id: str, question_id: str) -> str:
     return "\n".join(lines)
 
 
+def _fetch_question_submission_entries(
+    course_id: str,
+    question_id: str,
+) -> list[dict[str, str | bool]]:
+    """Return parsed question-submission entries from the submissions page."""
+    conn = get_connection()
+    url = (
+        f"{conn.gradescope_base_url}/courses/{course_id}"
+        f"/questions/{question_id}/submissions"
+    )
+    resp = conn.session.get(url)
+    if resp.status_code != 200:
+        raise ValueError(
+            f"Cannot access submissions page for question "
+            f"`{question_id}` (status {resp.status_code})."
+        )
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    pattern = re.compile(
+        rf"/courses/{re.escape(course_id)}/questions/{re.escape(question_id)}"
+        rf"/submissions/(\d+)/grade"
+    )
+
+    seen = set()
+    entries: list[dict[str, str | bool]] = []
+    for link in soup.find_all("a", href=pattern):
+        match = pattern.search(link.get("href", ""))
+        if not match:
+            continue
+        sid = match.group(1)
+        if sid in seen:
+            continue
+        seen.add(sid)
+
+        row = link.find_parent("tr")
+        student_name = ""
+        if row:
+            for td in row.find_all("td"):
+                text = td.get_text(strip=True)
+                if text and not text.startswith("/") and text != sid:
+                    student_name = text
+                    break
+
+        graded = False
+        if row:
+            # Scan <td> cells in reverse to find the score cell, which is
+            # typically the last or second-to-last column.  Checking cells
+            # individually avoids false positives from student names or IDs
+            # that happen to contain digits.
+            score_pattern = re.compile(
+                r"^\s*"
+                r"(?:\d+(?:\.\d+)?\s*/\s*\d+(?:\.\d+)?"  # N/N or N.N/N.N
+                r"|\d+(?:\.\d+)?"                         # plain number
+                r"|Graded|✓|✅)"
+                r"\s*$"
+            )
+            for td in reversed(row.find_all("td")):
+                cell_text = td.get_text(strip=True)
+                if cell_text and score_pattern.match(cell_text):
+                    graded = True
+                    break
+
+        entries.append(
+            {
+                "submission_id": sid,
+                "student_name": student_name,
+                "graded": graded,
+            }
+        )
+
+    entries.sort(key=lambda entry: int(str(entry["submission_id"])))
+    return entries
+
+
+def _fallback_next_ungraded_submission_id(
+    course_id: str,
+    question_id: str,
+    current_sid: str,
+) -> str | None:
+    """Fallback path when navigation_urls.next_ungraded is missing or stale."""
+    entries = _fetch_question_submission_entries(course_id, question_id)
+    ungraded_ids = [
+        str(entry["submission_id"])
+        for entry in entries
+        if not entry.get("graded", False)
+    ]
+    if not ungraded_ids:
+        return None
+
+    if current_sid and current_sid in ungraded_ids:
+        current_index = ungraded_ids.index(current_sid)
+        if current_index + 1 < len(ungraded_ids):
+            return ungraded_ids[current_index + 1]
+        return current_sid
+
+    for sid in ungraded_ids:
+        if not current_sid or int(sid) > int(current_sid):
+            return sid
+    return ungraded_ids[0]
+
+
+def _try_fallback_navigation(
+    course_id: str,
+    question_id: str,
+    current_sid: str,
+    props: dict,
+    output_format: str,
+) -> str:
+    """Attempt fallback navigation; always returns a displayable result string."""
+    try:
+        fallback_sid = _fallback_next_ungraded_submission_id(
+            course_id, question_id, current_sid
+        )
+    except AuthError as e:
+        return f"Authentication error: {e}"
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        return f"Error: {e}"
+    if fallback_sid is None:
+        return "All submissions for this question are graded! 🎉"
+    if fallback_sid == current_sid and not props.get("submission", {}).get("graded", False):
+        return (
+            "This is the only ungraded submission remaining for this "
+            "question.  Grade it first, then call `get_next_ungraded` "
+            "again to advance."
+        )
+    return get_submission_grading_context(
+        course_id, question_id, fallback_sid, output_format
+    )
+
 
 def apply_grade(
     course_id: str,
@@ -665,24 +796,10 @@ def create_rubric_item(
 
 def _find_question_submission_id(course_id: str, question_id: str) -> str:
     """Find a valid question submission ID by scraping the submissions page."""
-    conn = get_connection()
-    url = (
-        f"{conn.gradescope_base_url}/courses/{course_id}"
-        f"/questions/{question_id}/submissions"
-    )
-    resp = conn.session.get(url)
-    if resp.status_code != 200:
-        raise ValueError(
-            f"Cannot access submissions page for question `{question_id}` "
-            f"(status {resp.status_code})."
-        )
-    match = re.search(
-        rf"/courses/{course_id}/questions/{question_id}/submissions/(\d+)/grade",
-        resp.text,
-    )
-    if not match:
+    entries = _fetch_question_submission_entries(course_id, question_id)
+    if not entries:
         raise ValueError(f"No submission found for question `{question_id}`.")
-    return match.group(1)
+    return str(entries[0]["submission_id"])
 
 
 def list_question_submissions(
@@ -715,70 +832,13 @@ def list_question_submissions(
         return 'Error: filter must be "all", "ungraded", or "graded".'
 
     try:
-        conn = get_connection()
+        entries = _fetch_question_submission_entries(course_id, question_id)
     except AuthError as e:
         return f"Authentication error: {e}"
-
-    url = (
-        f"{conn.gradescope_base_url}/courses/{course_id}"
-        f"/questions/{question_id}/submissions"
-    )
-    try:
-        resp = conn.session.get(url)
+    except ValueError as e:
+        return f"Error: {e}"
     except Exception as e:
         return f"Error fetching submissions page: {e}"
-
-    if resp.status_code != 200:
-        return (
-            f"Error: Cannot access submissions page for question "
-            f"`{question_id}` (status {resp.status_code})."
-        )
-
-    soup = BeautifulSoup(resp.text, "html.parser")
-
-    # Each submission row is a link like:
-    #   /courses/{cid}/questions/{qid}/submissions/{sid}/grade
-    pattern = re.compile(
-        rf"/courses/{re.escape(course_id)}/questions/{re.escape(question_id)}"
-        rf"/submissions/(\d+)/grade"
-    )
-
-    seen = set()
-    entries = []
-
-    for link in soup.find_all("a", href=pattern):
-        m = pattern.search(link.get("href", ""))
-        if not m:
-            continue
-        sid = m.group(1)
-        if sid in seen:
-            continue
-        seen.add(sid)
-
-        # Try to extract student name from the row.
-        # The link text or a nearby cell often contains the name.
-        row = link.find_parent("tr")
-        student_name = ""
-        if row:
-            # First non-empty text cell that isn't just the link itself
-            for td in row.find_all("td"):
-                text = td.get_text(strip=True)
-                if text and not text.startswith("/") and text != sid:
-                    student_name = text
-                    break
-
-        # Check graded status from the row (look for check marks, scores, etc.)
-        graded = False
-        if row:
-            row_text = row.get_text()
-            # A score cell or "Graded" indicator usually means it's graded
-            graded = bool(re.search(r"\d+\.\d+|\bGraded\b|✓|✅", row_text))
-
-        entries.append({
-            "submission_id": sid,
-            "student_name": student_name,
-            "graded": graded,
-        })
 
     if not entries:
         return f"No submissions found for question `{question_id}`."
@@ -853,11 +913,16 @@ def get_next_ungraded(
     nav = props.get("navigation_urls", {})
     next_url = nav.get("next_ungraded", "")
 
-    # Determine the current submission ID we're sitting on
-    current_sid = submission_id or str(props.get("submission", {}).get("id", ""))
+    # Determine the current submission ID we're sitting on.
+    # ALWAYS use the ID from the loaded context (props), not the original
+    # input, because the input may be an invalid global submission ID that
+    # was auto-discovered into a different question submission ID.
+    current_sid = str(props.get("submission", {}).get("id", "")) or submission_id
 
     if not next_url:
-        return "All submissions for this question are graded! 🎉"
+        return _try_fallback_navigation(
+            course_id, question_id, current_sid, props, output_format
+        )
 
     # Extract IDs from the URL
     qid_m = re.search(r"/questions/(\d+)", next_url)
@@ -917,7 +982,9 @@ def get_next_ungraded(
                     return get_submission_grading_context(
                         course_id, a_qid_m.group(1), final_sid, output_format
                     )
-        return "All submissions for this question are graded! 🎉"
+        return _try_fallback_navigation(
+            course_id, question_id, current_sid, props, output_format
+        )
 
     # Normal case: next_ungraded points to a different submission
     return get_submission_grading_context(course_id, next_qid, next_sid, output_format)

@@ -640,8 +640,8 @@ def tool_grade_answer_group(
 @mcp.tool()
 def tool_prepare_grading_artifact(
     course_id: str,
-    assignment_id: str,
-    question_id: str,
+    assignment_id: str | None = None,
+    question_id: str = "",
     submission_id: str | None = None,
 ) -> str:
     """Prepare a cached /tmp markdown artifact for grading a question.
@@ -651,7 +651,8 @@ def tool_prepare_grading_artifact(
 
     Args:
         course_id: The Gradescope course ID.
-        assignment_id: The assignment ID.
+        assignment_id: Optional assignment ID. If omitted or wrong, the tool
+            will try to resolve the owning assignment from question_id.
         question_id: The question ID to prepare.
         submission_id: Optional sample submission ID to use for rubric/page context.
     """
@@ -663,9 +664,9 @@ def tool_prepare_grading_artifact(
 @mcp.tool()
 def tool_assess_submission_readiness(
     course_id: str,
-    assignment_id: str,
-    question_id: str,
-    submission_id: str,
+    assignment_id: str | None = None,
+    question_id: str = "",
+    submission_id: str = "",
 ) -> str:
     """Assess whether an agent should auto-grade a specific submission.
 
@@ -674,7 +675,8 @@ def tool_assess_submission_readiness(
 
     Args:
         course_id: The Gradescope course ID.
-        assignment_id: The assignment ID.
+        assignment_id: Optional assignment ID. If omitted or wrong, the tool
+            will try to resolve the owning assignment from question_id.
         question_id: The question ID.
         submission_id: The question submission ID.
     """
@@ -686,9 +688,9 @@ def tool_assess_submission_readiness(
 @mcp.tool()
 def tool_cache_relevant_pages(
     course_id: str,
-    assignment_id: str,
-    question_id: str,
-    submission_id: str,
+    assignment_id: str | None = None,
+    question_id: str = "",
+    submission_id: str = "",
 ) -> str:
     """Download the crop page and neighboring pages to /tmp for local review.
 
@@ -697,7 +699,8 @@ def tool_cache_relevant_pages(
 
     Args:
         course_id: The Gradescope course ID.
-        assignment_id: The assignment ID.
+        assignment_id: Optional assignment ID. If omitted or wrong, the tool
+            will try to resolve the owning assignment from question_id.
         question_id: The question ID.
         submission_id: The question submission ID.
     """
@@ -724,9 +727,9 @@ def tool_prepare_answer_key(course_id: str, assignment_id: str) -> str:
 @mcp.tool()
 def tool_smart_read_submission(
     course_id: str,
-    assignment_id: str,
-    question_id: str,
-    submission_id: str,
+    assignment_id: str | None = None,
+    question_id: str = "",
+    submission_id: str = "",
 ) -> str:
     """Get a smart, tiered reading plan for a student's submission.
 
@@ -739,7 +742,8 @@ def tool_smart_read_submission(
 
     Args:
         course_id: The Gradescope course ID.
-        assignment_id: The assignment ID.
+        assignment_id: Optional assignment ID. If omitted or wrong, the tool
+            will try to resolve the owning assignment from question_id.
         question_id: The question ID.
         submission_id: The question submission ID.
     """

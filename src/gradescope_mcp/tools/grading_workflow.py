@@ -57,6 +57,54 @@ def _fetch_assignment_questions(course_id: str, assignment_id: str) -> dict[str,
     return questions
 
 
+def _resolve_assignment_questions(
+    course_id: str,
+    assignment_id: str | None,
+    question_id: str,
+) -> tuple[str, dict[str, dict], str | None]:
+    """Resolve the assignment that owns a question."""
+    normalized_assignment_id = str(assignment_id or "").strip()
+    if normalized_assignment_id:
+        questions = _fetch_assignment_questions(course_id, normalized_assignment_id)
+        if str(question_id) in questions:
+            return normalized_assignment_id, questions, None
+
+    conn = get_connection()
+    assignments = conn.account.get_assignments(course_id)
+    for candidate in assignments:
+        candidate_id = str(candidate.assignment_id)
+        if candidate_id == normalized_assignment_id:
+            continue
+        try:
+            questions = _fetch_assignment_questions(course_id, candidate_id)
+        except Exception:
+            continue
+        if str(question_id) in questions:
+            if normalized_assignment_id:
+                note = (
+                    f"question `{question_id}` was not found in assignment "
+                    f"`{normalized_assignment_id}`; auto-resolved to "
+                    f"`{candidate_id}`."
+                )
+            else:
+                note = (
+                    f"assignment_id not provided; auto-resolved question "
+                    f"`{question_id}` to assignment `{candidate_id}`."
+                )
+            return candidate_id, questions, note
+
+    if normalized_assignment_id:
+        raise ValueError(
+            f"question `{question_id}` was not found in assignment "
+            f"`{normalized_assignment_id}` or any other assignment in course "
+            f"`{course_id}`."
+        )
+    raise ValueError(
+        f"Could not resolve an assignment for question `{question_id}` in "
+        f"course `{course_id}`."
+    )
+
+
 def _build_question_label(question_id: str, questions: dict[str, dict]) -> str:
     """Build a human-readable question label like Q4.2 from dashboard metadata."""
     target = questions.get(str(question_id))
@@ -223,6 +271,7 @@ def _compute_readiness(
     reference_answer: str | None,
     crop_rects: list[dict[str, Any]],
     pages: list[dict[str, Any]],
+    rubric_items: list[dict[str, Any]] | None = None,
 ) -> tuple[float, list[str], str]:
     """Compute a readiness score: do we have enough context to START grading?
 
@@ -239,12 +288,22 @@ def _compute_readiness(
     if prompt_text:
         score += 0.35
         reasons.append("Structured prompt text is available.")
+    elif crop_rects and pages:
+        score += 0.15
+        reasons.append(
+            "No structured prompt text, but scanned crop/page context is available."
+        )
     else:
         reasons.append("Prompt text is unavailable; grading depends on scanned pages.")
 
     if reference_answer:
         score += 0.2
         reasons.append("Reference answer or explanation is available.")
+    elif rubric_items:
+        score += 0.15
+        reasons.append(
+            "No structured reference answer, but rubric items are available for manual grading."
+        )
     else:
         reasons.append(
             "No reference answer was found. This is expected for scanned "
@@ -283,7 +342,7 @@ def _compute_readiness(
 
 def prepare_grading_artifact(
     course_id: str,
-    assignment_id: str,
+    assignment_id: str | None,
     question_id: str,
     submission_id: str | None = None,
 ) -> str:
@@ -292,17 +351,14 @@ def prepare_grading_artifact(
     The artifact includes question metadata, prompt text when available, rubric,
     a reference answer or fallback draft, and read-strategy notes for agents.
     """
-    if not course_id or not assignment_id or not question_id:
-        return "Error: course_id, assignment_id, and question_id are required."
+    if not course_id or not question_id:
+        return "Error: course_id and question_id are required."
 
     try:
-        questions = _fetch_assignment_questions(course_id, assignment_id)
-        target = questions.get(str(question_id))
-        if not target:
-            return (
-                f"Error: question `{question_id}` was not found in assignment "
-                f"`{assignment_id}`."
-            )
+        assignment_id, questions, resolution_note = _resolve_assignment_questions(
+            course_id, assignment_id, question_id
+        )
+        target = questions.get(str(question_id), {})
 
         if submission_id is None:
             submission_id = _find_first_submission_id(course_id, question_id)
@@ -335,7 +391,7 @@ def prepare_grading_artifact(
     relevant_pages = _select_relevant_pages(pages, crop_rects)
 
     readiness, reasons, action = _compute_readiness(
-        prompt_text, explanation, crop_rects, relevant_pages
+        prompt_text, explanation, crop_rects, relevant_pages, rubric_items
     )
     question_label = _build_question_label(question_id, questions)
 
@@ -353,15 +409,21 @@ def prepare_grading_artifact(
         f"- sample_submission_id: `{submission_id}`",
         f"- weight: `{question.get('weight', target.get('weight', '?'))}`",
         f"- question_type: `{question.get('type', target.get('type', 'Unknown'))}`",
-        "",
-        "## Prompt",
-        prompt_text or (
-            "Prompt text is not available from Gradescope's structured data. "
-            "Use the crop regions and page URLs below to inspect the scanned prompt."
-        ),
-        "",
-        "## Rubric",
     ]
+    if resolution_note:
+        lines.append(f"- resolution: {resolution_note}")
+    lines.extend(
+        [
+            "",
+            "## Prompt",
+            prompt_text or (
+                "Prompt text is not available from Gradescope's structured data. "
+                "Use the crop regions and page URLs below to inspect the scanned prompt."
+            ),
+            "",
+            "## Rubric",
+        ]
+    )
 
     if rubric_items:
         for item in rubric_items:
@@ -434,18 +496,25 @@ def prepare_grading_artifact(
     )
 
     artifact_path.write_text("\n".join(lines), encoding="utf-8")
-    return (
-        f"Prepared grading artifact for {question_label}.\n"
-        f"- Path: `{artifact_path}`\n"
-        f"- Readiness: `{readiness:.2f}` ({action})\n"
-        f"- **Remember:** After reading each submission, self-report your "
-        f"grading confidence via the `confidence` param in `tool_apply_grade`."
+    summary = [
+        f"Prepared grading artifact for {question_label}.",
+        f"- Path: `{artifact_path}`",
+    ]
+    if resolution_note:
+        summary.append(f"- Resolution: {resolution_note}")
+    summary.extend(
+        [
+            f"- Readiness: `{readiness:.2f}` ({action})",
+            "- **Remember:** After reading each submission, self-report your "
+            "grading confidence via the `confidence` param in `tool_apply_grade`.",
+        ]
     )
+    return "\n".join(summary)
 
 
 def assess_submission_readiness(
     course_id: str,
-    assignment_id: str,
+    assignment_id: str | None,
     question_id: str,
     submission_id: str,
 ) -> str:
@@ -454,14 +523,16 @@ def assess_submission_readiness(
     Returns the preferred read order, page/crop hints, and a confidence score
     that can be used to skip or escalate uncertain submissions.
     """
-    if not course_id or not assignment_id or not question_id or not submission_id:
+    if not course_id or not question_id or not submission_id:
         return (
-            "Error: course_id, assignment_id, question_id, and submission_id "
+            "Error: course_id, question_id, and submission_id "
             "are required."
         )
 
     try:
-        questions = _fetch_assignment_questions(course_id, assignment_id)
+        assignment_id, questions, resolution_note = _resolve_assignment_questions(
+            course_id, assignment_id, question_id
+        )
         ctx = _get_grading_context(course_id, question_id, submission_id)
         prompt_text, explanation = _extract_outline_prompt_and_reference(
             course_id, assignment_id, question_id
@@ -482,10 +553,10 @@ def assess_submission_readiness(
         if isinstance(page, dict) and page.get("url")
     ]
     relevant_pages = _select_relevant_pages(pages, crop_rects)
-    page_count = len(relevant_pages)
     reference_answer = explanation or None
     readiness, reasons, action = _compute_readiness(
-        prompt_text, reference_answer, crop_rects, relevant_pages
+        prompt_text, reference_answer, crop_rects, relevant_pages,
+        props.get("rubric_items", []),
     )
     question_label = _build_question_label(question_id, questions)
 
@@ -497,12 +568,15 @@ def assess_submission_readiness(
 
     lines = [
         f"## Readiness Assessment — {question_label}",
+        f"- assignment_id: `{assignment_id}`",
         f"- submission_id: `{submission_id}`",
         f"- readiness: `{readiness:.2f}`",
         f"- status: `{action}`",
         "",
         "### Read Order",
     ]
+    if resolution_note:
+        lines.append(f"- resolution: {resolution_note}")
     lines.extend(f"- {step}" for step in strategy)
 
     if crop_rects:
@@ -526,18 +600,21 @@ def assess_submission_readiness(
 
 def cache_relevant_pages(
     course_id: str,
-    assignment_id: str,
+    assignment_id: str | None,
     question_id: str,
     submission_id: str,
 ) -> str:
     """Download the crop page and its neighbors to /tmp for local inspection."""
-    if not course_id or not assignment_id or not question_id or not submission_id:
+    if not course_id or not question_id or not submission_id:
         return (
-            "Error: course_id, assignment_id, question_id, and submission_id "
+            "Error: course_id, question_id, and submission_id "
             "are required."
         )
 
     try:
+        assignment_id, _questions, _resolution_note = _resolve_assignment_questions(
+            course_id, assignment_id, question_id
+        )
         ctx = _get_grading_context(course_id, question_id, submission_id)
         conn = get_connection()
     except AuthError as e:
@@ -584,17 +661,17 @@ def cache_relevant_pages(
 
 
 def prepare_answer_key(course_id: str, assignment_id: str) -> str:
-    """Prepare a complete answer key for an entire assignment.
+    """Prepare an assignment-wide grading basis artifact.
 
     Extracts ALL questions from the assignment outline, including:
     - Question numbers, types, and weights
     - Prompt/question text (if available in structured data)
     - Explanation/reference answers (if provided by the instructor)
-    - For questions without reference answers, generates a rubric-based draft
+    - Explicit missing-answer markers when no instructor reference exists
 
     Saves the result to /tmp/gradescope-answerkey-{assignment_id}.md.
-    This file can then be referenced when grading individual submissions,
-    saving context by not having to re-fetch question details each time.
+    This file can then be referenced when grading individual submissions
+    without implying that every question has a true answer key.
 
     Args:
         course_id: The Gradescope course ID.
@@ -668,7 +745,7 @@ def prepare_answer_key(course_id: str, assignment_id: str) -> str:
 
     # Build markdown
     lines = [
-        f"# Answer Key: {title}",
+        f"# Grading Basis: {title}",
         f"",
         f"- **course_id:** `{course_id}`",
         f"- **assignment_id:** `{assignment_id}`",
@@ -696,11 +773,12 @@ def prepare_answer_key(course_id: str, assignment_id: str) -> str:
             lines.append("")
         else:
             missing_answers.append(q["label"])
-            lines.append("### Reference Answer")
+            lines.append("### Reference Status")
             lines.append(
-                "⚠️ No reference answer available for this question. "
+                "⚠️ No instructor-provided reference answer is available for this question. "
                 "This is typical for scanned PDF / handwritten assignments. "
-                "Use the rubric items as your grading criteria."
+                "Do not treat this file as a true answer key here; use the rubric items, prompt, "
+                "and scanned pages as your grading basis."
             )
             lines.append("")
 
@@ -714,18 +792,21 @@ def prepare_answer_key(course_id: str, assignment_id: str) -> str:
     artifact_path = pathlib.Path(f"/tmp/gradescope-answerkey-{assignment_id}.md")
     artifact_path.write_text("\n".join(lines), encoding="utf-8")
 
+    covered_answers = len(question_list) - len(missing_answers)
+
     return (
-        f"✅ Answer key prepared for **{title}**\n"
+        f"✅ Grading basis prepared for **{title}**\n"
         f"- Path: `{artifact_path}`\n"
         f"- Questions: {len(question_list)}\n"
+        f"- Questions with instructor reference answers: {covered_answers}\n"
         f"- Missing reference answers: {len(missing_answers)} ({', '.join(missing_answers) or 'none'})\n\n"
-        f"Use this file as context when grading submissions."
+        f"Use this file as context when grading submissions. Missing-answer entries are placeholders, not true answer keys."
     )
 
 
 def smart_read_submission(
     course_id: str,
-    assignment_id: str,
+    assignment_id: str | None,
     question_id: str,
     submission_id: str,
 ) -> str:
@@ -747,11 +828,13 @@ def smart_read_submission(
         question_id: The question ID.
         submission_id: The question submission ID.
     """
-    if not course_id or not assignment_id or not question_id or not submission_id:
-        return "Error: all four IDs are required."
+    if not course_id or not question_id or not submission_id:
+        return "Error: course_id, question_id, and submission_id are required."
 
     try:
-        questions = _fetch_assignment_questions(course_id, assignment_id)
+        assignment_id, questions, resolution_note = _resolve_assignment_questions(
+            course_id, assignment_id, question_id
+        )
         ctx = _get_grading_context(course_id, question_id, submission_id)
         prompt_text, explanation = _extract_outline_prompt_and_reference(
             course_id, assignment_id, question_id,
@@ -778,16 +861,20 @@ def smart_read_submission(
     # Compute readiness (pre-read context check, NOT grading confidence)
     reference = explanation or None
     readiness, reasons, action = _compute_readiness(
-        prompt_text, reference, crop_rects, pages,
+        prompt_text, reference, crop_rects, pages, props.get("rubric_items", []),
     )
 
     lines = [
         f"## Smart Read Plan — {question_label}",
         f"**Student:** {submission.get('owner_names', 'Unknown')}",
+        f"**Assignment ID:** `{assignment_id}`",
         f"**Weight:** {question.get('weight', '?')} pts",
         f"**Readiness:** `{readiness:.2f}` → `{action}`",
         "",
     ]
+    if resolution_note:
+        lines.append(f"**Resolution:** {resolution_note}")
+        lines.append("")
 
     # Tier 1: Crop pages only
     crop_page_numbers = sorted(set(
@@ -854,8 +941,8 @@ def smart_read_submission(
 
     if action == "not_ready":
         lines.append(
-            "⚠️ **NOT READY** — Missing critical context (no prompt text, no reference). "
-            "Consider skipping or requesting human assistance."
+            "⚠️ **NOT READY** — Even after using the scanned pages, the available context is thin. "
+            "Escalate or request human review."
         )
     elif action == "partially_ready":
         lines.append(
