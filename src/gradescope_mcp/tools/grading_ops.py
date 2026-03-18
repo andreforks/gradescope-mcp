@@ -226,6 +226,74 @@ def get_submission_grading_context(
     return "\n".join(lines)
 
 
+def get_question_rubric(course_id: str, question_id: str) -> str:
+    """Get rubric items for a question without requiring a submission ID.
+
+    Useful when you know the question_id from get_assignment_outline but
+    don't have a specific submission ID. Auto-discovers a submission to
+    extract rubric data.
+
+    Args:
+        course_id: The Gradescope course ID.
+        question_id: The question ID from outline.
+    """
+    if not course_id or not question_id:
+        return "Error: both course_id and question_id are required."
+
+    try:
+        conn = get_connection()
+        # Find any submission for this question
+        url = (
+            f"{conn.gradescope_base_url}/courses/{course_id}"
+            f"/questions/{question_id}/submissions"
+        )
+        resp = conn.session.get(url)
+        if resp.status_code != 200:
+            return f"Error: Cannot access submissions for question `{question_id}` (status {resp.status_code})."
+
+        match = re.search(
+            rf"/courses/{course_id}/questions/{question_id}/submissions/(\d+)/grade",
+            resp.text,
+        )
+        if not match:
+            return f"No submissions found for question `{question_id}`. Rubric may not exist yet."
+
+        sub_id = match.group(1)
+        ctx = _get_grading_context(course_id, question_id, sub_id)
+    except AuthError as e:
+        return f"Authentication error: {e}"
+    except ValueError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        return f"Error fetching rubric: {e}"
+
+    question = ctx["props"].get("question", {})
+    rubric_items = question.get("rubric", [])
+
+    if not rubric_items:
+        return f"No rubric items found for question `{question_id}`. You can create them with `tool_create_rubric_item`."
+
+    weight = question.get("weight", "?")
+    scoring_type = question.get("scoring_type", "positive")
+
+    lines = [f"## Rubric for Question `{question_id}`\n"]
+    lines.append(f"**Weight:** {weight} pts")
+    lines.append(f"**Scoring:** {scoring_type}\n")
+    lines.append("| ID | Description | Points |")
+    lines.append("|----|-------------|--------|")
+
+    for item in rubric_items:
+        desc = item.get("description", "(no description)")
+        # Escape pipes in description
+        desc = desc.replace("|", "\\|")
+        lines.append(
+            f"| `{item['id']}` | {desc} | {item.get('weight', 0)} |"
+        )
+
+    return "\n".join(lines)
+
+
+
 def apply_grade(
     course_id: str,
     question_id: str,

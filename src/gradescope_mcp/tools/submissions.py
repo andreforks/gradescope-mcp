@@ -100,8 +100,12 @@ def upload_submission(
 def get_assignment_submissions(course_id: str, assignment_id: str) -> str:
     """Get all submissions for an assignment (instructor/TA only).
 
-    Works for all assignment types including scanned PDF/image-only exams.
+    Works for all assignment types: scanned PDF, online, and code assignments.
     Returns submission IDs, graded status, and grading progress.
+
+    Note: The returned IDs are **Global Submission IDs** (the whole assignment
+    submission). For grading a specific question, you may need the per-question
+    submission ID from `get_submission_grading_context`.
 
     Args:
         course_id: The Gradescope course ID.
@@ -112,8 +116,7 @@ def get_assignment_submissions(course_id: str, assignment_id: str) -> str:
 
     try:
         conn = get_connection()
-        # Use the submissions.json endpoint directly — the gradescopeapi library
-        # raises NotImplementedError for image-only / scanned PDF assignments.
+        # Primary: submissions.json (works for scanned PDF/image assignments)
         resp = conn.session.get(
             f"{conn.gradescope_base_url}/courses/{course_id}"
             f"/assignments/{assignment_id}/submissions.json",
@@ -122,22 +125,27 @@ def get_assignment_submissions(course_id: str, assignment_id: str) -> str:
                 "X-Requested-With": "XMLHttpRequest",
             },
         )
-        if resp.status_code != 200:
-            return f"Error: Cannot access submissions (status {resp.status_code})."
 
-        data = resp.json()
+        if resp.status_code == 200:
+            return _format_submissions_json(resp.json(), assignment_id, course_id)
+
+        # Fallback: scrape review_grades HTML table (works for online assignments)
+        return _get_submissions_from_review_grades(conn, course_id, assignment_id)
+
     except AuthError as e:
         return f"Authentication error: {e}"
     except Exception as e:
         return f"Error fetching submissions: {e}"
 
+
+def _format_submissions_json(data: dict, assignment_id: str, course_id: str) -> str:
+    """Format submission data from the submissions.json endpoint."""
     detailed = data.get("detailed_submissions", {})
     basic = data.get("submissions", {})
 
     if not detailed and not basic:
         return f"No submissions found for assignment `{assignment_id}` in course `{course_id}`."
 
-    # Prefer detailed_submissions (has grading progress), fall back to basic
     subs = detailed or basic
     total = len(subs)
     graded = sum(1 for s in subs.values() if s.get("graded"))
@@ -154,6 +162,83 @@ def get_assignment_submissions(course_id: str, assignment_id: str) -> str:
         progress_str = f"{progress:.0f}%" if progress is not None else "—"
         late = "⚠️" if sub.get("late") else ""
         lines.append(f"| {i} | `{sub_id}` | {is_graded} | {progress_str} | {late} |")
+
+    return "\n".join(lines)
+
+
+def _get_submissions_from_review_grades(
+    conn, course_id: str, assignment_id: str
+) -> str:
+    """Fallback: scrape submission list from the review_grades HTML table.
+
+    Used for online assignments where submissions.json returns 404.
+    """
+    import re
+    from bs4 import BeautifulSoup
+
+    url = (
+        f"{conn.gradescope_base_url}/courses/{course_id}"
+        f"/assignments/{assignment_id}/review_grades"
+    )
+    resp = conn.session.get(url)
+    if resp.status_code != 200:
+        return f"Error: Cannot access submissions or review_grades (status {resp.status_code})."
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    table = soup.find("table")
+    if not table:
+        return (
+            f"Error: No submission data found for assignment `{assignment_id}`. "
+            "The submissions.json endpoint returned 404 and the review_grades page "
+            "has no table. This assignment type may not be supported yet."
+        )
+
+    rows = table.find_all("tr")[1:]  # skip header
+    if not rows:
+        return f"No submissions found for assignment `{assignment_id}` in course `{course_id}`."
+
+    # Extract submission IDs from links
+    submissions = []
+    sub_id_pattern = re.compile(r"/submissions/(\d+)")
+    for row in rows:
+        cells = row.find_all("td")
+        if not cells:
+            continue
+
+        # Find submission ID from any link in the row
+        sub_id = None
+        for link in row.find_all("a", href=True):
+            match = sub_id_pattern.search(link["href"])
+            if match:
+                sub_id = match.group(1)
+                break
+
+        if not sub_id:
+            continue
+
+        # Extract score and graded status from cells
+        score_text = cells[4].get_text(strip=True) if len(cells) > 4 else ""
+        graded_text = cells[5].get_text(strip=True) if len(cells) > 5 else ""
+
+        submissions.append({
+            "id": sub_id,
+            "score": score_text,
+            "graded": bool(graded_text and graded_text != "--"),
+        })
+
+    total = len(submissions)
+    graded = sum(1 for s in submissions if s["graded"])
+
+    lines = [f"## Submissions for Assignment {assignment_id}\n"]
+    lines.append(f"**Total submissions:** {total}")
+    lines.append(f"**Graded:** {graded}/{total}")
+    lines.append("_(Note: retrieved from review_grades fallback)_\n")
+    lines.append("| # | Submission ID | Score | Graded |")
+    lines.append("|---|---------------|-------|--------|")
+
+    for i, sub in enumerate(submissions, 1):
+        is_graded = "✅" if sub["graded"] else "—"
+        lines.append(f"| {i} | `{sub['id']}` | {sub['score']} | {is_graded} |")
 
     return "\n".join(lines)
 

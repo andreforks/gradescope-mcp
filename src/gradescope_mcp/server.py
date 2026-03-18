@@ -40,6 +40,7 @@ from gradescope_mcp.tools.grading_ops import (
     update_rubric_item,
     delete_rubric_item,
     get_next_ungraded,
+    get_question_rubric,
 )
 from gradescope_mcp.tools.answer_groups import (
     get_answer_groups,
@@ -432,6 +433,23 @@ def tool_apply_grade(
         confidence,
         confirm_write,
     )
+
+
+@mcp.tool()
+def tool_get_question_rubric(
+    course_id: str,
+    question_id: str,
+) -> str:
+    """Get rubric items for a question without needing a submission ID.
+
+    Auto-discovers a submission to extract rubric data. Use when you know
+    the question_id from outline but don't have a submission ID yet.
+
+    Args:
+        course_id: The Gradescope course ID.
+        question_id: The question ID from outline.
+    """
+    return get_question_rubric(course_id, question_id)
 
 
 @mcp.tool()
