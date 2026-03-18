@@ -233,6 +233,7 @@ def apply_grade(
     rubric_item_ids: list[str] | None = None,
     point_adjustment: float | None = None,
     comment: str | None = None,
+    confidence: float | None = None,
     confirm_write: bool = False,
 ) -> str:
     """Apply a grade to a student's question submission.
@@ -253,6 +254,11 @@ def apply_grade(
         point_adjustment: Submission-specific point adjustment (can be negative).
             Pass None to keep current adjustment unchanged.
         comment: Grader comment for this submission. Pass None to keep unchanged.
+        confidence: Agent's self-assessed grading confidence (0.0-1.0).
+            - < 0.6: Grade will be REJECTED — skip or flag for human review.
+            - 0.6-0.8: Grade will proceed with a warning to review.
+            - > 0.8: Grade proceeds normally.
+            - None: No confidence gating (manual grading mode).
         confirm_write: Must be True to save the grade.
     """
     if not course_id or not question_id or not submission_id:
@@ -260,6 +266,19 @@ def apply_grade(
 
     if rubric_item_ids is None and point_adjustment is None and comment is None:
         return "Error: at least one of rubric_item_ids, point_adjustment, or comment must be provided."
+
+    # Confidence gate: reject low-confidence grades
+    if confidence is not None:
+        if confidence < 0.0 or confidence > 1.0:
+            return "Error: confidence must be between 0.0 and 1.0."
+        if confidence < 0.6:
+            return (
+                f"⚠️ **Grade REJECTED** — Your confidence is `{confidence:.2f}` (below 0.6 threshold).\n"
+                f"**Action:** Skip this submission or flag for human review.\n"
+                f"- submission_id: `{submission_id}`\n"
+                f"- Tip: If the handwriting is unclear or the answer is ambiguous, "
+                f"move to the next submission with `tool_get_next_ungraded`."
+            )
 
     try:
         ctx = _get_grading_context(course_id, question_id, submission_id)

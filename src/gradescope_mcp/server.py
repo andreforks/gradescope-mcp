@@ -401,6 +401,7 @@ def tool_apply_grade(
     rubric_item_ids: list[str] | None = None,
     point_adjustment: float | None = None,
     comment: str | None = None,
+    confidence: float | None = None,
     confirm_write: bool = False,
 ) -> str:
     """Apply a grade to a student's question submission.
@@ -416,6 +417,9 @@ def tool_apply_grade(
             in this list will be unchecked. Pass None to keep unchanged.
         point_adjustment: Submission-specific point adjustment. Pass None to keep.
         comment: Grader comment. Pass None to keep unchanged.
+        confidence: Agent's self-assessed grading confidence (0.0-1.0).
+            Below 0.6 = rejected. 0.6-0.8 = warning. Above 0.8 = OK.
+            Pass None to skip confidence gating (manual mode).
         confirm_write: Must be True to save the grade.
     """
     return apply_grade(
@@ -425,6 +429,7 @@ def tool_apply_grade(
         rubric_item_ids,
         point_adjustment,
         comment,
+        confidence,
         confirm_write,
     )
 
@@ -882,21 +887,28 @@ def auto_grade_question(
         f"**Step 2 — Get Grading Context**\n"
         f"Call tool_prepare_grading_artifact(course_id='{course_id}', "
         f"assignment_id='{assignment_id}', question_id='{question_id}') "
-        f"to get rubric items, crop regions, and initial confidence.\n\n"
+        f"to get rubric items, crop regions, and readiness score.\n\n"
         f"**Step 3 — For Each Submission (loop)**\n"
         f"a) Call tool_smart_read_submission to get the tiered reading plan.\n"
         f"b) Read **Tier 1 (crop only)** first. If the answer is complete, proceed.\n"
         f"   If truncated, escalate to Tier 2 (full page), then Tier 3 (adjacent).\n"
-        f"c) Check the confidence score:\n"
-        f"   - `auto_grade_ok` (≥0.8): Apply grade directly.\n"
-        f"   - `review_before_write` (0.55-0.8): Present your grading for user review.\n"
-        f"   - `skip_or_human_review` (<0.55): Skip and note for manual grading.\n"
-        f"d) Apply grade via tool_apply_grade with rubric_item_ids, comment, "
-        f"and optional point_adjustment.\n"
+        f"c) After reading the student's work, self-assess your **grading confidence**:\n"
+        f"   - How clear is the student's handwriting/answer?\n"
+        f"   - How certain are you about which rubric items apply?\n"
+        f"   - Are there any ambiguities you cannot resolve?\n"
+        f"   - Assign a confidence score from 0.0 to 1.0.\n"
+        f"d) Apply grade via tool_apply_grade with:\n"
+        f"   - rubric_item_ids, comment, optional point_adjustment\n"
+        f"   - **confidence=YOUR_SCORE** (this gates the write)\n"
+        f"   - confirm_write=True\n"
         f"e) Call tool_get_next_ungraded to move to the next submission.\n\n"
+        f"**Confidence Thresholds:**\n"
+        f"- `confidence >= 0.8`: Grade is saved normally.\n"
+        f"- `confidence 0.6-0.8`: Grade is saved with a warning for human review.\n"
+        f"- `confidence < 0.6`: Grade is REJECTED. Skip this submission.\n\n"
         f"**Important Rules:**\n"
         f"- Never grade without reading the student's actual work first.\n"
-        f"- If you're not confident (score < 0.55), SKIP and flag for human review.\n"
+        f"- Always self-report an honest confidence score.\n"
         f"- Always include a brief justification in the comment field.\n"
         f"- Present a summary after each batch of 5-10 submissions."
     )

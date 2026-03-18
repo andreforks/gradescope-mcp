@@ -203,13 +203,21 @@ def _select_relevant_pages(
     return filtered or pages[:3]
 
 
-def _compute_confidence(
+def _compute_readiness(
     prompt_text: str | None,
     reference_answer: str | None,
     crop_rects: list[dict[str, Any]],
     pages: list[dict[str, Any]],
 ) -> tuple[float, list[str], str]:
-    """Compute a coarse confidence score and recommended action."""
+    """Compute a readiness score: do we have enough context to START grading?
+
+    This is NOT the same as grading confidence. Readiness checks whether we
+    have the question text, reference answers, crop regions, etc. Grading
+    confidence can only be determined by the AI agent AFTER reading the
+    student's actual submission.
+
+    Returns (score, reasons, action).
+    """
     score = 0.25
     reasons: list[str] = []
 
@@ -239,11 +247,11 @@ def _compute_confidence(
 
     bounded = max(0.0, min(score, 0.95))
     if bounded >= 0.8:
-        action = "auto_grade_ok"
+        action = "ready"
     elif bounded >= 0.55:
-        action = "review_before_write"
+        action = "partially_ready"
     else:
-        action = "skip_or_human_review"
+        action = "not_ready"
     return bounded, reasons, action
 
 
@@ -296,7 +304,7 @@ def prepare_grading_artifact(
     ]
     relevant_pages = _select_relevant_pages(pages, crop_rects)
 
-    confidence, reasons, action = _compute_confidence(
+    readiness, reasons, action = _compute_readiness(
         prompt_text, reference_answer, crop_rects, relevant_pages
     )
     question_label = _build_question_label(question_id, questions)
@@ -360,20 +368,34 @@ def prepare_grading_artifact(
     lines.extend(
         [
             "",
-            "## Confidence Gate",
-            f"- confidence: `{confidence:.2f}`",
-            f"- recommended_action: `{action}`",
+            "## Readiness Assessment",
+            f"- readiness: `{readiness:.2f}`",
+            f"- status: `{action}`",
         ]
     )
     for reason in reasons:
         lines.append(f"- {reason}")
 
+    lines.extend(
+        [
+            "",
+            "## Grading Confidence (Agent Self-Report)",
+            "After reading the student's answer, YOU (the agent) must assess:",
+            "- **confidence**: a float 0.0-1.0 representing how sure you are about your grade",
+            "- Pass this as the `confidence` parameter when calling `tool_apply_grade`",
+            "- If confidence < 0.6: skip this submission and flag for human review",
+            "- If confidence 0.6-0.8: grade but present to user for confirmation first",
+            "- If confidence > 0.8: safe to auto-grade",
+        ]
+    )
+
     artifact_path.write_text("\n".join(lines), encoding="utf-8")
     return (
         f"Prepared grading artifact for {question_label}.\n"
         f"- Path: `{artifact_path}`\n"
-        f"- Confidence: `{confidence:.2f}`\n"
-        f"- Recommended action: `{action}`"
+        f"- Readiness: `{readiness:.2f}` ({action})\n"
+        f"- **Remember:** After reading each submission, self-report your "
+        f"grading confidence via the `confidence` param in `tool_apply_grade`."
     )
 
 
@@ -418,7 +440,7 @@ def assess_submission_readiness(
     relevant_pages = _select_relevant_pages(pages, crop_rects)
     page_count = len(relevant_pages)
     reference_answer = explanation or None
-    confidence, reasons, action = _compute_confidence(
+    readiness, reasons, action = _compute_readiness(
         prompt_text, reference_answer, crop_rects, relevant_pages
     )
     question_label = _build_question_label(question_id, questions)
@@ -432,23 +454,23 @@ def assess_submission_readiness(
     # Heuristic: big crop or multi-page scanned submissions deserve caution.
     if any((rect.get("y2", 0) - rect.get("y1", 0)) > 30 for rect in crop_rects):
         reasons.append("Large crop height suggests the answer may span more than one logical block.")
-        confidence = max(0.0, confidence - 0.05)
+        readiness = max(0.0, readiness - 0.05)
     if page_count >= 8:
         reasons.append("This submission has many scanned pages, so cross-page spillover is more likely.")
-        confidence = max(0.0, confidence - 0.05)
+        readiness = max(0.0, readiness - 0.05)
 
-    if confidence < 0.55:
-        action = "skip_or_human_review"
-    elif confidence < 0.8:
-        action = "review_before_write"
+    if readiness < 0.55:
+        action = "not_ready"
+    elif readiness < 0.8:
+        action = "partially_ready"
     else:
-        action = "auto_grade_ok"
+        action = "ready"
 
     lines = [
         f"## Readiness Assessment — {question_label}",
         f"- submission_id: `{submission_id}`",
-        f"- confidence: `{confidence:.2f}`",
-        f"- recommended_action: `{action}`",
+        f"- readiness: `{readiness:.2f}`",
+        f"- status: `{action}`",
         "",
         "### Read Order",
     ]
@@ -466,7 +488,7 @@ def assess_submission_readiness(
             lines.append(f"- page {page.get('number', '?')}: {page['url']}")
 
     lines.append("")
-    lines.append("### Confidence Notes")
+    lines.append("### Readiness Notes")
     for reason in reasons:
         lines.append(f"- {reason}")
 
@@ -723,9 +745,9 @@ def smart_read_submission(
 
     question_label = _build_question_label(question_id, questions)
 
-    # Compute confidence
+    # Compute readiness (pre-read context check, NOT grading confidence)
     reference = explanation or None
-    confidence, reasons, action = _compute_confidence(
+    readiness, reasons, action = _compute_readiness(
         prompt_text, reference, crop_rects, pages,
     )
 
@@ -733,7 +755,7 @@ def smart_read_submission(
         f"## Smart Read Plan — {question_label}",
         f"**Student:** {submission.get('owner_names', 'Unknown')}",
         f"**Weight:** {question.get('weight', '?')} pts",
-        f"**Confidence:** `{confidence:.2f}` → `{action}`",
+        f"**Readiness:** `{readiness:.2f}` → `{action}`",
         "",
     ]
 
@@ -794,27 +816,37 @@ def smart_read_submission(
             lines.append(f"- _...and {len(pages) - 5} more pages_")
         lines.append("")
 
-    # Confidence notes
-    lines.append("### Confidence Assessment")
+    # Readiness notes
+    lines.append("### Readiness Assessment")
     for reason in reasons:
         lines.append(f"- {reason}")
     lines.append("")
 
-    if action == "skip_or_human_review":
+    if action == "not_ready":
         lines.append(
-            "⚠️ **LOW CONFIDENCE** — Skip this submission or flag for human review. "
-            "Do NOT auto-grade."
+            "⚠️ **NOT READY** — Missing critical context (no prompt text, no reference). "
+            "Consider skipping or requesting human assistance."
         )
-    elif action == "review_before_write":
+    elif action == "partially_ready":
         lines.append(
-            "⚡ **MEDIUM CONFIDENCE** — Grade with caution. Present your grading to "
-            "the user for confirmation before saving."
+            "⚡ **PARTIALLY READY** — Some context is missing. Proceed with caution."
         )
     else:
         lines.append(
-            "✅ **HIGH CONFIDENCE** — Safe to auto-grade. "
-            "Still present results for review if possible."
+            "✅ **READY** — All key context available. Good to start reading."
         )
+
+    lines.extend(
+        [
+            "",
+            "### Grading Confidence (Your Responsibility)",
+            "After reading the student's answer, assess your own grading confidence:",
+            "- **confidence 0.0-0.6**: Skip, flag for human review",
+            "- **confidence 0.6-0.8**: Grade but request user confirmation",
+            "- **confidence 0.8-1.0**: Safe to auto-grade",
+            "- Pass your confidence score as `confidence` in `tool_apply_grade`.",
+        ]
+    )
 
     # Answer key reference
     answer_key_path = f"/tmp/gradescope-answerkey-{assignment_id}.md"
