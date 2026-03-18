@@ -75,10 +75,12 @@ Use the artifact to gather:
 - Crop regions and relevant page URLs
 - Whether the question uses positive or negative scoring
 
-Scoring default:
-- If the question metadata or rubric clearly says otherwise, follow the actual question scoring mode.
-- If the question does not make the scoring mode obvious, default your grading reasoning to deduction-based scoring.
-- In deduction-based scoring, select the mistakes that occurred. Do not invent positive-credit rubric logic.
+Scoring mode auto-detection:
+- Before grading any question, read the `scoring_type` from `tool_get_submission_grading_context` or `tool_prepare_grading_artifact`. The grading context explicitly states the scoring direction.
+- If the scoring type is `positive`, rubric items add earned points. Select the credit the student deserves.
+- If the scoring type is `negative` (or absent — Gradescope defaults to negative), rubric items deduct from full marks. Select the mistakes found.
+- If the rubric weights conflict with the stated scoring type (e.g., positive-weight items on a negative-scoring question), stop and ask the user before grading. This likely indicates a misconfigured rubric.
+- Never begin grading a question without confirming its scoring mode. Using the wrong convention will systematically misgrade every submission.
 
 Reference priority order:
 1. User-provided reference answers saved in `/tmp`
@@ -166,6 +168,11 @@ Tiered reading order:
 2. Full page if the crop is truncated or unclear
 3. Adjacent pages if the reasoning spills across pages
 
+Visual cross-validation (scanned/handwritten work):
+- For numerical answers, always compare the crop-region reading against the full-page reading. If the extracted values differ (e.g., a missing negative sign, decimal point, or exponent), force the confidence below 0.6 and flag for human review.
+- Do not trust a single-pass OCR reading for answers where small visual features (−, ., ×10^n) change the meaning.
+- If the crop region cuts through handwriting, read the full page before deciding. Truncated crop reads are a common source of false confidence.
+
 Before grading, ask:
 - Is the work legible enough?
 - Do the rubric items apply unambiguously?
@@ -201,6 +208,33 @@ Show the user:
 
 Only after explicit approval:
 - Call `tool_apply_grade(..., confirm_write=True)`
+
+#### Batch Approval (High-Volume Grading)
+
+For large classes (50+ submissions per question), per-submission approval is impractical. Use batch approval instead:
+
+1. **Collect phase**: Grade multiple submissions with `confirm_write=False` only. Accumulate all previews into a summary table:
+   - Student name, submission ID, proposed rubric items, expected score, confidence, and grading link
+2. **Present phase**: Show the user the full table at once. Example:
+   ```
+   | # | Student        | Score | Rubric Items  | Confidence | Link |
+   |---|---------------|-------|---------------|------------|------|
+   | 1 | Alice Chen     | 8/10  | [-2] Q3 error | 0.92       | [→]  |
+   | 2 | Bob Kim        | 10/10 | [0] Correct   | 0.95       | [→]  |
+   | 3 | Carol Wang     | 6/10  | [-4] Two errs | 0.71       | [→]  |
+   ```
+3. **Approve phase**: The user may respond with:
+   - "全部通过" / "approve all" → execute all
+   - "除了 #3，其余通过" → execute all except #3
+   - "#3 改成 7 分" → adjust #3 and execute
+4. **Execute phase**: Call `tool_apply_grade(..., confirm_write=True)` only for approved entries.
+
+Batch size: present 10–30 submissions per approval round. Do not ask the user to review 200 at once.
+
+The agent should proactively offer batch approval mode when:
+- The question has more than 20 ungraded submissions
+- Most submissions share the same answer pattern (high group homogeneity)
+- The user explicitly asks for speed
 
 Confidence policy:
 - `confidence < 0.6`: do not attempt to post; skip for human review
@@ -277,6 +311,22 @@ When a subagent finds rubric insufficiency:
 - If the issue appears reusable or likely to recur, it must stop and return the case to the main agent for rubric review
 - If uncertainty is high, it must skip rather than compensate with an arbitrary adjustment
 
+#### Cross-Agent Consensus — Deduplicating Rubric Gaps
+
+When multiple subagents independently report that the same rubric gap prevents them from grading, the main agent must deduplicate:
+
+1. After all subagents return, collect their skipped/escalated cases.
+2. Group escalations by rubric gap description (e.g., "no rubric item for partial credit on method").
+3. If N ≥ 2 subagents report the same gap, treat it as a confirmed rubric deficiency — propose one rubric update to the user, not N separate alerts.
+4. After the rubric update is approved, re-dispatch only the affected submissions to subagents for re-grading.
+
+Subagent return format for escalations should include:
+- `gap_description`: short text describing what the rubric cannot express
+- `affected_submission_ids`: list of submission IDs blocked by this gap
+- `suggested_rubric_change`: optional draft of what the new item should look like
+
+This prevents the user from seeing 5 identical "rubric gap found" alerts when 5 subagents hit the same issue.
+
 ### 7. Post-Grading
 
 After each question or grading pass:
@@ -311,15 +361,16 @@ Use this default order unless the user directs otherwise:
 1. `tool_get_assignment_outline`
 2. `tool_get_grading_progress`
 3. `tool_prepare_answer_key`
-4. `tool_prepare_grading_artifact`
+4. `tool_prepare_grading_artifact` — confirm scoring mode (positive/negative) here
 5. `tool_get_question_rubric`
 6. Optional rubric draft and approval loop
 7. `tool_get_answer_groups` to decide batch vs individual grading
-8. Batch path:
+8. `tool_list_question_submissions(filter="ungraded")` for ID pre-allocation (parallel grading)
+9. Batch path:
    `tool_get_answer_group_detail` -> preview -> user approval -> execute
-9. Individual path:
-   `tool_get_next_ungraded` -> `tool_get_submission_grading_context(output_format="json")` -> `tool_assess_submission_readiness` if needed -> `tool_smart_read_submission` if needed -> `tool_cache_relevant_pages` if needed -> preview -> user approval -> execute
-10. `tool_get_assignment_statistics`
+10. Individual path:
+   `tool_list_question_submissions` -> partition IDs -> subagents grade with `tool_get_submission_grading_context(output_format="json")` -> `tool_assess_submission_readiness` if needed -> `tool_smart_read_submission` if needed -> `tool_cache_relevant_pages` if needed -> preview -> batch approval table -> execute
+11. `tool_get_assignment_statistics`
 
 ## Failure Handling
 
