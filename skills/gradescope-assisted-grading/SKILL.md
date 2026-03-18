@@ -244,8 +244,10 @@ Subagents are good for:
 
 **CRITICAL:** `tool_get_next_ungraded` has race conditions under parallel use. Multiple subagents calling it simultaneously will receive stale or duplicate results, leading to "all graded" false positives and wasted turns.
 
+**IMPORTANT:** `tool_get_assignment_submissions` returns **Global Submission IDs** — these will 404 if passed to `tool_get_submission_grading_context` or `tool_apply_grade`. You must use `tool_list_question_submissions` to get **Question Submission IDs** that work with grading tools.
+
 Correct parallel workflow:
-1. **Main agent** fetches the full list of ungraded submission IDs upfront (e.g., via `tool_get_assignment_submissions` or by looping `tool_get_next_ungraded` sequentially before spawning subagents).
+1. **Main agent** calls `tool_list_question_submissions(course_id, question_id, filter="ungraded")` to get Question Submission IDs.
 2. **Main agent** partitions the IDs into non-overlapping batches and assigns each batch to a subagent.
 3. **Subagents** grade only their assigned IDs using `tool_get_submission_grading_context(submission_id=...)` and `tool_apply_grade(submission_id=...)`. They never call `tool_get_next_ungraded`.
 

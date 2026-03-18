@@ -41,6 +41,7 @@ from gradescope_mcp.tools.grading_ops import (
     delete_rubric_item,
     get_next_ungraded,
     get_question_rubric,
+    list_question_submissions,
 )
 from gradescope_mcp.tools.answer_groups import (
     get_answer_groups,
@@ -478,6 +479,24 @@ def tool_create_rubric_item(
     return create_rubric_item(
         course_id, question_id, description, weight, confirm_write
     )
+
+
+@mcp.tool()
+def tool_list_question_submissions(
+    course_id: str, question_id: str, filter: str = "all",
+) -> str:
+    """List all Question Submission IDs for a question.
+
+    Use this to pre-allocate submission IDs to subagents for parallel
+    grading. Returns **Question Submission IDs** (not Global IDs) that
+    work directly with ``get_submission_grading_context`` and ``apply_grade``.
+
+    Args:
+        course_id: The Gradescope course ID.
+        question_id: The question ID.
+        filter: "all" (default), "ungraded", or "graded".
+    """
+    return list_question_submissions(course_id, question_id, filter)
 
 
 @mcp.tool()

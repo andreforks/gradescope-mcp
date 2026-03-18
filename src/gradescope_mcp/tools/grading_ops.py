@@ -681,6 +681,121 @@ def _find_question_submission_id(course_id: str, question_id: str) -> str:
     return match.group(1)
 
 
+def list_question_submissions(
+    course_id: str, question_id: str, filter: str = "all",
+) -> str:
+    """List all Question Submission IDs for a question.
+
+    This tool is essential for parallel grading: use it to pre-allocate
+    specific submission IDs to subagents so they can grade independently
+    without race conditions.
+
+    Unlike ``get_assignment_submissions`` (which returns Global Submission
+    IDs that grading tools cannot use), this returns **Question Submission
+    IDs** that work directly with ``get_submission_grading_context`` and
+    ``apply_grade``.
+
+    Args:
+        course_id: The Gradescope course ID.
+        question_id: The question ID.
+        filter: ``"all"`` (default), ``"ungraded"``, or ``"graded"``.
+
+    Returns:
+        JSON list of ``{submission_id, student_name, graded}`` entries
+        for the requested question, sorted by submission ID.
+    """
+    if not course_id or not question_id:
+        return "Error: course_id and question_id are required."
+
+    if filter not in ("all", "ungraded", "graded"):
+        return 'Error: filter must be "all", "ungraded", or "graded".'
+
+    try:
+        conn = get_connection()
+    except AuthError as e:
+        return f"Authentication error: {e}"
+
+    url = (
+        f"{conn.gradescope_base_url}/courses/{course_id}"
+        f"/questions/{question_id}/submissions"
+    )
+    try:
+        resp = conn.session.get(url)
+    except Exception as e:
+        return f"Error fetching submissions page: {e}"
+
+    if resp.status_code != 200:
+        return (
+            f"Error: Cannot access submissions page for question "
+            f"`{question_id}` (status {resp.status_code})."
+        )
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+
+    # Each submission row is a link like:
+    #   /courses/{cid}/questions/{qid}/submissions/{sid}/grade
+    pattern = re.compile(
+        rf"/courses/{re.escape(course_id)}/questions/{re.escape(question_id)}"
+        rf"/submissions/(\d+)/grade"
+    )
+
+    seen = set()
+    entries = []
+
+    for link in soup.find_all("a", href=pattern):
+        m = pattern.search(link.get("href", ""))
+        if not m:
+            continue
+        sid = m.group(1)
+        if sid in seen:
+            continue
+        seen.add(sid)
+
+        # Try to extract student name from the row.
+        # The link text or a nearby cell often contains the name.
+        row = link.find_parent("tr")
+        student_name = ""
+        if row:
+            # First non-empty text cell that isn't just the link itself
+            for td in row.find_all("td"):
+                text = td.get_text(strip=True)
+                if text and not text.startswith("/") and text != sid:
+                    student_name = text
+                    break
+
+        # Check graded status from the row (look for check marks, scores, etc.)
+        graded = False
+        if row:
+            row_text = row.get_text()
+            # A score cell or "Graded" indicator usually means it's graded
+            graded = bool(re.search(r"\d+\.\d+|\bGraded\b|✓|✅", row_text))
+
+        entries.append({
+            "submission_id": sid,
+            "student_name": student_name,
+            "graded": graded,
+        })
+
+    if not entries:
+        return f"No submissions found for question `{question_id}`."
+
+    # Apply filter
+    if filter == "ungraded":
+        entries = [e for e in entries if not e["graded"]]
+    elif filter == "graded":
+        entries = [e for e in entries if e["graded"]]
+
+    # Sort by submission_id
+    entries.sort(key=lambda e: int(e["submission_id"]))
+
+    summary = (
+        f"Found {len(entries)} {'(' + filter + ') ' if filter != 'all' else ''}"
+        f"submissions for question `{question_id}`."
+    )
+
+    return json.dumps({"summary": summary, "submissions": entries}, indent=2)
+
+
 def get_next_ungraded(
     course_id: str, question_id: str, submission_id: str = "",
     output_format: str = "markdown",
