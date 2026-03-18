@@ -133,17 +133,22 @@ def get_answer_groups(
         return json.dumps(result, indent=2)
 
     # Markdown output
-    ag_type = question.get('assisted_grading_type') or '(not set)'
+    ag_type = question.get('assisted_grading_type')
+    # Resolve type: use assisted_grading_type first, fall back to per-group types
+    if not ag_type and groups:
+        group_types = {g.get('question_type', '') for g in groups if g.get('question_type')}
+        ag_type = ', '.join(sorted(group_types)) if group_types else None
+    ag_type_display = ag_type or '(not set)'
     group_word = 'group' if len(groups) == 1 else 'groups'
     lines = [
         f"## Answer Groups — {question.get('numbered_title', question_id)}",
-        f"**Type:** {ag_type}",
+        f"**Type:** {ag_type_display}",
         f"**Status:** {status}",
         f"**Total:** {len(submissions)} submissions across {len(groups)} {group_word}"
         + (f" + {len(ungrouped)} ungrouped" if ungrouped else ""),
         "",
-        "| # | Group ID | Title | Size | Graded | Hidden |",
-        "|---|----------|-------|------|--------|--------|",
+        "| # | Group ID | Title | Type | Size | Graded | Hidden |",
+        "|---|----------|-------|------|------|--------|--------|",
     ]
 
     for i, g in enumerate(groups, 1):
@@ -153,10 +158,11 @@ def get_answer_groups(
         # Truncate long LaTeX titles
         if len(title) > 60:
             title = title[:57] + "..."
+        g_type = g.get("question_type", "") or ""
         hidden = "🙈" if g.get("hidden") else ""
         graded_str = f"{counts['graded']}/{counts['total']}"
         lines.append(
-            f"| {i} | `{gid}` | {title} | {counts['total']} | {graded_str} | {hidden} |"
+            f"| {i} | `{gid}` | {title} | {g_type} | {counts['total']} | {graded_str} | {hidden} |"
         )
 
     if ungrouped:

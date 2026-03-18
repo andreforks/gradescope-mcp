@@ -304,9 +304,11 @@ def get_assignment_graders(course_id: str, question_id: str) -> str:
         lines.append(f"- {grader}")
 
     if id_only or dirty_labels:
-        extras = id_only + dirty_labels
-        lines.append(f"\n⚠️ **Note:** {len(extras)} grader entry(ies) filtered out: "
-                      f"{', '.join(str(x) for x in extras[:5])}. "
-                      "These may be system/auto-grader entries or internal labels.")
+        extras_count = len(id_only) + len(dirty_labels)
+        lines.append(
+            f"\n⚠️ **Note:** {extras_count} system/auto-grader "
+            f"{'entry was' if extras_count == 1 else 'entries were'} "
+            "filtered from the list."
+        )
 
     return "\n".join(lines)

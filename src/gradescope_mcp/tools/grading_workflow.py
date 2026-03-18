@@ -318,7 +318,10 @@ def prepare_grading_artifact(
         course_id, assignment_id, question_id
     )
     rubric_items = _extract_rubric_summary(props)
-    reference_answer = explanation or _draft_reference_from_rubric(rubric_items)
+    # Only use the real explanation for readiness scoring — NOT the rubric
+    # fallback.  The rubric draft is still included in the artifact text for
+    # guidance, but it must not inflate the readiness score.
+    rubric_draft = _draft_reference_from_rubric(rubric_items) if not explanation else None
     parameters = question.get("parameters") or {}
     crop_rects = parameters.get("crop_rect_list", [])
     pages = [
@@ -329,7 +332,7 @@ def prepare_grading_artifact(
     relevant_pages = _select_relevant_pages(pages, crop_rects)
 
     readiness, reasons, action = _compute_readiness(
-        prompt_text, reference_answer, crop_rects, relevant_pages
+        prompt_text, explanation, crop_rects, relevant_pages
     )
     question_label = _build_question_label(question_id, questions)
 
@@ -365,11 +368,22 @@ def prepare_grading_artifact(
     else:
         lines.append("- No rubric items found.")
 
+    # Show the reference answer section with clear labeling
+    if explanation:
+        ref_section_title = "## Reference Answer"
+        ref_section_body = explanation
+    elif rubric_draft:
+        ref_section_title = "## Reference Answer (⚠️ Rubric-Based Fallback)"
+        ref_section_body = rubric_draft
+    else:
+        ref_section_title = "## Reference Answer"
+        ref_section_body = "No reference answer is available."
+
     lines.extend(
         [
             "",
-            "## Reference Answer",
-            reference_answer or "No reference answer is available.",
+            ref_section_title,
+            ref_section_body,
             "",
             "## Read Strategy",
             "- Start with the crop region only.",

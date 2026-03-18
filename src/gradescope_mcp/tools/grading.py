@@ -191,9 +191,13 @@ def get_assignment_outline(course_id: str, assignment_id: str) -> str:
             lines.append("")
         else:
             # It's a standalone question (no children)
+            if group["id"]:
+                lines.append(f"**Question ID:** `{group['id']}`")
             text = _extract_text_content(group["content"])
             if text:
                 lines.append(f"_{text[:200]}_\n")
+            else:
+                lines.append("")
 
     return "\n".join(lines)
 

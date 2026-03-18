@@ -51,7 +51,17 @@ def _get_grading_context(course_id: str, question_id: str, submission_id: str) -
     resp = conn.session.get(url)
 
     if resp.status_code != 200:
-        raise ValueError(f"Cannot access grading page (status {resp.status_code}).")
+        hint = ""
+        if resp.status_code == 404:
+            hint = (
+                " This often means you are using a Global Submission ID "
+                "(from get_assignment_submissions) instead of a Question "
+                "Submission ID. Use get_next_ungraded or get_grading_progress "
+                "to obtain the correct Question Submission ID."
+            )
+        raise ValueError(
+            f"Cannot access grading page (status {resp.status_code}).{hint}"
+        )
 
     soup = BeautifulSoup(resp.text, "html.parser")
 
