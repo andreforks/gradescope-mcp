@@ -19,7 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 def _get_outline_data(course_id: str, assignment_id: str) -> dict:
-    """Fetch and parse the AssignmentEditor React props from /outline/edit.
+    """Fetch and parse outline React props from /outline/edit.
+
+    Supports both AssignmentEditor (online assignments) and
+    AssignmentOutline (scanned PDF exams) components.
 
     Returns the full props dict with questions, assignment info, etc.
     Raises ValueError if the page structure is not as expected.
@@ -35,15 +38,46 @@ def _get_outline_data(course_id: str, assignment_id: str) -> dict:
         )
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    editor = soup.find(attrs={"data-react-class": "AssignmentEditor"})
-    if editor is None:
-        raise ValueError(
-            "AssignmentEditor component not found on outline page. "
-            "The assignment may not support outline editing."
-        )
 
-    props_str = editor.get("data-react-props", "{}")
-    return json.loads(props_str)
+    # Try AssignmentEditor first (online/homework assignments)
+    editor = soup.find(attrs={"data-react-class": "AssignmentEditor"})
+    if editor is not None:
+        return json.loads(editor.get("data-react-props", "{}"))
+
+    # Fallback: AssignmentOutline (scanned PDF exams)
+    outline_tag = soup.find(attrs={"data-react-class": "AssignmentOutline"})
+    if outline_tag is not None:
+        props = json.loads(outline_tag.get("data-react-props", "{}"))
+        # Normalize: AssignmentOutline stores data in "outline" (list)
+        # and "assignment" (dict). Convert outline list → questions dict
+        # to match the format _build_question_tree expects.
+        outline_list = props.get("outline", [])
+        questions = {}
+
+        def _flatten(items):
+            for item in items:
+                qid = str(item["id"])
+                questions[qid] = {
+                    "id": item["id"],
+                    "type": item.get("type", ""),
+                    "title": item.get("title", ""),
+                    "weight": item.get("weight"),
+                    "index": item.get("index", 0),
+                    "parent_id": item.get("parent_id"),
+                    "content": item.get("content", []),
+                }
+                children = item.get("children", [])
+                if children:
+                    _flatten(children)
+
+        _flatten(outline_list)
+        props["questions"] = questions
+        return props
+
+    raise ValueError(
+        "Neither AssignmentEditor nor AssignmentOutline component found. "
+        "The assignment type may not be supported."
+    )
 
 
 def _build_question_tree(questions: dict) -> list[dict]:
