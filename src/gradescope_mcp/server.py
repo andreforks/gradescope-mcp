@@ -478,7 +478,8 @@ def tool_create_rubric_item(
 
 @mcp.tool()
 def tool_get_next_ungraded(
-    course_id: str, question_id: str, submission_id: str
+    course_id: str, question_id: str, submission_id: str = "",
+    output_format: str = "markdown",
 ) -> str:
     """Navigate to the next ungraded submission.
 
@@ -488,9 +489,12 @@ def tool_get_next_ungraded(
     Args:
         course_id: The current course ID.
         question_id: The current question ID.
-        submission_id: The current submission ID.
+        submission_id: The current Question Submission ID (optional).
+            If omitted or invalid (e.g. a Global Submission ID), the tool
+            will auto-discover a valid submission to navigate from.
+        output_format: "markdown" (default) or "json".
     """
-    return get_next_ungraded(course_id, question_id, submission_id)
+    return get_next_ungraded(course_id, question_id, submission_id, output_format)
 
 
 @mcp.tool()

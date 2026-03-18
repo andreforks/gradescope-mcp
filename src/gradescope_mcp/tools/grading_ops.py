@@ -564,8 +564,31 @@ def create_rubric_item(
         return f"Error: Failed to create rubric item (status {resp.status_code}). Response: {resp.text[:300]}"
 
 
+def _find_question_submission_id(course_id: str, question_id: str) -> str:
+    """Find a valid question submission ID by scraping the submissions page."""
+    conn = get_connection()
+    url = (
+        f"{conn.gradescope_base_url}/courses/{course_id}"
+        f"/questions/{question_id}/submissions"
+    )
+    resp = conn.session.get(url)
+    if resp.status_code != 200:
+        raise ValueError(
+            f"Cannot access submissions page for question `{question_id}` "
+            f"(status {resp.status_code})."
+        )
+    match = re.search(
+        rf"/courses/{course_id}/questions/{question_id}/submissions/(\d+)/grade",
+        resp.text,
+    )
+    if not match:
+        raise ValueError(f"No submission found for question `{question_id}`.")
+    return match.group(1)
+
+
 def get_next_ungraded(
-    course_id: str, question_id: str, submission_id: str
+    course_id: str, question_id: str, submission_id: str = "",
+    output_format: str = "markdown",
 ) -> str:
     """Navigate to the next ungraded submission for the same question.
 
@@ -575,15 +598,42 @@ def get_next_ungraded(
     Args:
         course_id: The Gradescope course ID.
         question_id: The current question ID.
-        submission_id: The current submission ID.
+        submission_id: The current Question Submission ID (optional).
+            If omitted or invalid, auto-discovers a valid submission.
+            NOTE: This must be a Question Submission ID, not a Global
+            Submission ID from get_assignment_submissions.
+        output_format: "markdown" (default) or "json".
     """
-    if not course_id or not question_id or not submission_id:
-        return "Error: course_id, question_id, and submission_id are required."
+    if not course_id or not question_id:
+        return "Error: course_id and question_id are required."
 
-    try:
-        ctx = _get_grading_context(course_id, question_id, submission_id)
-    except (AuthError, ValueError, Exception) as e:
-        return f"Error: {e}"
+    # Try the provided submission_id first; fall back to auto-discovery
+    ctx = None
+    if submission_id:
+        try:
+            ctx = _get_grading_context(course_id, question_id, submission_id)
+        except ValueError as e:
+            if "404" in str(e):
+                # Likely a Global Submission ID — fall back to auto-discovery
+                ctx = None
+            else:
+                return f"Error: {e}"
+        except AuthError as e:
+            return f"Authentication error: {e}"
+        except Exception as e:
+            return f"Error: {e}"
+
+    if ctx is None:
+        # Auto-discover a valid question submission ID
+        try:
+            auto_sid = _find_question_submission_id(course_id, question_id)
+            ctx = _get_grading_context(course_id, question_id, auto_sid)
+        except AuthError as e:
+            return f"Authentication error: {e}"
+        except ValueError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error: {e}"
 
     nav = ctx["props"].get("navigation_urls", {})
     next_url = nav.get("next_ungraded", "")
@@ -602,7 +652,7 @@ def get_next_ungraded(
     next_sid = sid_m.group(1)
 
     # Return the grading context for the next submission
-    return get_submission_grading_context(course_id, next_qid, next_sid)
+    return get_submission_grading_context(course_id, next_qid, next_sid, output_format)
 
 
 def update_rubric_item(
