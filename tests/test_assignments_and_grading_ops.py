@@ -179,6 +179,7 @@ def test_get_submission_grading_context_markdown_shows_real_pages_only(monkeypat
 
     assert "## Grading Context — QIntegral" in result
     assert "**Scoring:** negative (floor=0, ceiling=10)" in result
+    assert "Rubric items **deduct** points" in result
     assert "- **next_submission**: qid=`2`, sid=`100`" in result
     assert "**Relevant pages:** [3]" in result
     assert "- Page 2: [View](https://example.com/page2.jpg)" in result
@@ -224,3 +225,104 @@ def test_get_question_rubric_uses_question_rubric_fallback(monkeypatch) -> None:
     assert "**Weight:** 7 pts" in result
     assert "**Scoring:** negative" in result
     assert "| `55` | Needs \\| escaping | -2 |" in result
+
+
+def test_apply_grade_sends_json_payload(monkeypatch) -> None:
+    """Verify apply_grade sends JSON (not form-encoded) matching Gradescope's format."""
+    captured = {}
+
+    class FakeSession:
+        def post(self, url, **kwargs):
+            captured["url"] = url
+            captured["kwargs"] = kwargs
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: {"score": 4.0},
+                text='{"score": 4.0}',
+            )
+
+    monkeypatch.setattr(
+        grading_ops,
+        "_get_grading_context",
+        lambda *_args, **_kwargs: {
+            "props": {
+                "question": {"title": "Q1", "weight": 5},
+                "submission": {"score": None, "graded": False},
+                "evaluation": {"points": None, "comments": None},
+                "rubric_items": [
+                    {"id": 100, "description": "Correct", "weight": 5},
+                    {"id": 200, "description": "Partial", "weight": 2},
+                ],
+                "rubric_item_evaluations": [],
+                "urls": {"save_grade": "/courses/1/questions/2/submissions/99/save_grade"},
+            },
+            "csrf_token": "test-csrf-token",
+            "session": FakeSession(),
+            "base_url": "https://example.com",
+        },
+    )
+
+    result = grading_ops.apply_grade(
+        course_id="1",
+        question_id="2",
+        submission_id="99",
+        rubric_item_ids=["100"],
+        point_adjustment=None,
+        comment="Good work",
+        confirm_write=True,
+    )
+
+    assert "Grade saved" in result
+
+    # Verify JSON payload structure
+    payload = captured["kwargs"]["json"]
+    assert "rubric_items" in payload
+    assert "question_submission_evaluation" in payload
+    assert payload["rubric_items"]["100"] == {"score": "true"}
+    assert payload["rubric_items"]["200"] == {"score": "false"}
+    assert payload["question_submission_evaluation"]["comments"] == "Good work"
+    assert payload["question_submission_evaluation"]["points"] is None
+
+    # Verify Content-Type header
+    headers = captured["kwargs"]["headers"]
+    assert headers["Content-Type"] == "application/json"
+
+    # Verify json= was used (not data=)
+    assert "data" not in captured["kwargs"]
+
+
+def test_positive_scoring_context_shows_add_hint(monkeypatch) -> None:
+    """Positive scoring should show 'items add points' hint."""
+    monkeypatch.setattr(
+        grading_ops,
+        "_get_grading_context",
+        lambda *_args, **_kwargs: {
+            "props": {
+                "question": {
+                    "title": "MCQ",
+                    "weight": 4,
+                    "scoring_type": "positive",
+                },
+                "submission": {
+                    "owner_names": "Student C",
+                    "score": None,
+                    "graded": False,
+                    "answers": {},
+                },
+                "evaluation": {},
+                "rubric_items": [
+                    {"id": 1, "description": "Correct", "weight": 4},
+                ],
+                "rubric_item_evaluations": [],
+                "navigation_urls": {},
+                "num_graded_submissions": 0,
+                "num_submissions": 10,
+                "pages": [],
+            }
+        },
+    )
+
+    result = grading_ops.get_submission_grading_context("1", "2", "99")
+    assert "Rubric items **add** points" in result
+    assert "deduct" not in result.lower()
+

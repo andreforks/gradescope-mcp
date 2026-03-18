@@ -464,11 +464,15 @@ def tool_create_rubric_item(
 
     **WARNING**: Changes the rubric for ALL submissions.
 
+    Weight semantics depend on the question's scoring type:
+    - **Positive scoring:** Items ADD points (use positive weights).
+    - **Negative scoring:** Items DEDUCT from max (use negative weights).
+
     Args:
         course_id: The Gradescope course ID.
         question_id: The question ID.
         description: Rubric item description.
-        weight: Point value (negative for deductions, positive for credit).
+        weight: Point value — see scoring-type note above.
         confirm_write: Must be True to create the rubric item.
     """
     return create_rubric_item(

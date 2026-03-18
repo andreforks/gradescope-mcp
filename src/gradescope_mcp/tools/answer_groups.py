@@ -413,7 +413,7 @@ def grade_answer_group(
                 f"/submissions/{match.group(1)}/save_many_grades",
             )
 
-    # Build payload
+    # Build JSON payload matching what the Gradescope frontend sends.
     rubric_items = props.get("rubric_items", [])
     current_evals = props.get("rubric_item_evaluations", [])
     current_eval = props.get("evaluation", {})
@@ -423,32 +423,41 @@ def grade_answer_group(
     else:
         apply_ids = {str(e["rubric_item_id"]) for e in current_evals if e.get("present")}
 
-    payload = {}
+    rubric_items_payload = {}
     for ri in rubric_items:
         rid = str(ri["id"])
-        present = rid in apply_ids
-        payload[f"rubric_item_ids[{rid}]"] = "true" if present else "false"
+        rubric_items_payload[rid] = {
+            "score": "true" if rid in apply_ids else "false"
+        }
 
-    if point_adjustment is not None:
-        payload["points"] = str(point_adjustment)
-    elif current_eval.get("points") is not None:
-        payload["points"] = str(current_eval["points"])
+    resolved_points = (
+        point_adjustment if point_adjustment is not None
+        else current_eval.get("points")
+    )
+    resolved_comments = (
+        comment if comment is not None
+        else current_eval.get("comments")
+    )
 
-    if comment is not None:
-        payload["comment"] = comment
-    elif current_eval.get("comments"):
-        payload["comment"] = current_eval["comments"]
+    json_payload = {
+        "rubric_items": rubric_items_payload,
+        "question_submission_evaluation": {
+            "points": resolved_points,
+            "comments": resolved_comments,
+        },
+    }
 
     headers = {
         "X-CSRF-Token": csrf_token,
-        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
         "X-Requested-With": "XMLHttpRequest",
     }
 
     try:
         resp = conn.session.post(
             f"{conn.gradescope_base_url}{save_many_url}",
-            data=payload,
+            json=json_payload,
             headers=headers,
         )
     except Exception as e:

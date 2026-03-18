@@ -1,19 +1,23 @@
 ---
 name: gradescope-assisted-grading
-description: Human-approved grading workflow for Gradescope assignments using the Gradescope MCP server. Use for discovering assignments, drafting reference answers for scanned exams, proposing rubric changes, selecting batch vs individual grading, previewing grades, and only posting rubric changes or grades after explicit user approval.
+description: Human-approved grading workflow for Gradescope assignments using the Gradescope MCP server. Use for assignment discovery, rubric review, scanned-exam grading, answer-group triage, previewing grade mutations, and only executing writes after explicit user approval.
 ---
 
 # Gradescope Assisted Grading
 
-Use this skill when grading a Gradescope assignment through the Gradescope MCP server. The workflow is agent-driven, but all rubric mutations and all grade writes require explicit human approval before execution.
+Use this skill when grading through the Gradescope MCP server. The workflow is agent-driven, but every rubric mutation and every grade write requires explicit user approval before execution.
 
-## Core Policy
+## Non-Negotiable Rules
 
-- Preview first. Every write-capable tool must be called with `confirm_write=False` before any mutation.
+- Preview first. For every write-capable tool, call it once with `confirm_write=False` before any mutation.
 - Approval before execution. Only call `confirm_write=True` after the user explicitly approves that exact action.
-- Read before grading. Never grade without reading the student's actual work.
-- Skip ambiguity. If you cannot determine a precise grade, skip the submission and flag it for human review.
-- User-provided reference answers override inferred ones. If the user supplies an answer key, model solution, grading notes, or a canonical answer, use that as the primary reference source.
+- Read before grading. Never grade without reading the student's actual work or an answer-group sample that is clearly representative.
+- Skip ambiguity. If the grade is not precise and defensible, skip and flag for human review.
+- Preserve user authority. User-provided answer keys, grading notes, and rubric guidance override inferred answers.
+- Prefer structured output. When a tool supports `output_format`, prefer `output_format="json"` for planning and decision-making.
+- Do not confuse "leave unchanged" with "clear". In `tool_apply_grade` and `tool_grade_answer_group`, `rubric_item_ids=None` means keep current rubric state, while `rubric_item_ids=[]` means clear all rubric items.
+- Default to deduction logic. Unless the question clearly indicates otherwise, assume the grading mindset is negative scoring: start from full credit, use rubric items as deductions, and treat `correct` or equivalent full-credit states as `0` deduction.
+- Default to preserving existing grades. If a submission already appears graded, skip it unless the user explicitly asks for regrading, audit, or overwrite behavior.
 
 ## When To Use
 
@@ -38,7 +42,12 @@ If the user does not provide IDs:
 - Call `tool_get_assignment_outline(course_id, assignment_id)`
 - Call `tool_get_grading_progress(course_id, assignment_id)`
 
-Record the leaf questions with non-zero weight. Skip questions that are already fully graded.
+Record only leaf questions with non-zero weight. Skip questions that are already fully graded unless the user explicitly asks for regrading or audit work.
+
+For individual submissions that are already graded, skip them by default. Only re-grade previously graded submissions when:
+- The user explicitly requests regrading or audit
+- A rubric change was applied after the original grading
+- The user confirms bulk regrading for a specific question
 
 ### 2. Build The Grading Basis
 
@@ -55,6 +64,7 @@ When the user provides reference answers:
 - Organize them by question label or question ID if possible.
 - Treat this user-supplied file as higher priority than generated fallback answers.
 - If the user-provided answer conflicts with the existing rubric, stop and ask whether the rubric should be updated before grading continues.
+- Treat `/tmp` as session-local cache, not durable storage. On a new conversation or restarted environment, re-read the generated answer key and ask the user to re-provide any external reference answers that are no longer present.
 
 For each question, call `tool_prepare_grading_artifact(course_id, assignment_id, question_id)` and read `/tmp/gradescope-grading-{assignment_id}-{question_id}.md`.
 
@@ -63,6 +73,12 @@ Use the artifact to gather:
 - Rubric item IDs and descriptions
 - Readiness notes
 - Crop regions and relevant page URLs
+- Whether the question uses positive or negative scoring
+
+Scoring default:
+- If the question metadata or rubric clearly says otherwise, follow the actual question scoring mode.
+- If the question does not make the scoring mode obvious, default your grading reasoning to deduction-based scoring.
+- In deduction-based scoring, select the mistakes that occurred. Do not invent positive-credit rubric logic.
 
 Reference priority order:
 1. User-provided reference answers saved in `/tmp`
@@ -75,6 +91,8 @@ If the rubric is incomplete or unclear:
 - Draft the rubric changes in chat first.
 - Explain why each new or changed item is needed.
 - Ask the user to approve the rubric mutation.
+- State whether the question is positive-scoring or negative-scoring so the proposed weights use the correct sign.
+- Default proposed rubric weights to negative values unless the question clearly uses positive scoring.
 
 Only after approval:
 - Call `tool_create_rubric_item(..., confirm_write=True)` for new items
@@ -99,6 +117,7 @@ Prefer individual grading when:
 - No answer groups are available
 - The question is subjective, proof-based, explanation-heavy, or high-risk
 - Handwritten answers require per-submission reading
+- The representative samples inside a group are inconsistent or not obviously equivalent
 
 ### 5. Batch Grading
 
@@ -107,6 +126,8 @@ For each ungraded group:
 - Read representative crops or inferred answers
 - Compare the answer against your grading basis and the rubric
 - Decide `rubric_item_ids` and a short justification comment
+- If the detail view does not provide enough confidence that the whole group is homogeneous, do not batch grade that group
+- If the existing rubric does not precisely capture the group outcome, decide whether this is a reusable rubric gap or a one-off grading exception before assigning `point_adjustment`
 
 Preview the action:
 - Call `tool_grade_answer_group(..., confirm_write=False)`
@@ -127,11 +148,18 @@ If batch grading fails or the group is too ambiguous:
 ### 6. Individual Grading
 
 Enter the question-level loop with:
-- `tool_get_next_ungraded(course_id, question_id)`
+- `tool_get_next_ungraded(course_id, question_id, output_format="json")`
 
 For each submission:
-- Read the grading context from `tool_get_submission_grading_context`
-- For scanned work, also call `tool_smart_read_submission(course_id, assignment_id, question_id, submission_id)` and follow the tiered read order
+- Read the grading context from `tool_get_submission_grading_context(course_id, question_id, submission_id, output_format="json")`
+- If the context indicates the submission is already graded, skip it unless the user explicitly requested regrading or overwrite behavior
+- Call `tool_assess_submission_readiness(course_id, assignment_id, question_id, submission_id)` before expensive reading whenever legibility, completeness, or automation suitability is uncertain
+- For scanned work, call `tool_smart_read_submission(course_id, assignment_id, question_id, submission_id)` and follow the tiered read order
+- If local visual review is needed, call `tool_cache_relevant_pages(course_id, assignment_id, question_id, submission_id)` and inspect the cached files in `/tmp`
+
+Readiness-first rule:
+- If readiness is clearly low, do not spend additional tokens on OCR, full-page reading, or long analysis
+- Low-readiness submissions should be skipped or escalated unless the user specifically wants a manual deep read
 
 Tiered reading order:
 1. Crop region only
@@ -152,9 +180,16 @@ If the answer is gradable:
 - Decide `rubric_item_ids`
 - Add a concise comment
 - Set an honest confidence score
+- Ensure the selected rubric items match the question scoring mode:
+  positive scoring means selected items add earned points
+  negative scoring means selected items are deductions from full credit
+- If the rubric alone cannot express the grade precisely, decide whether to use `point_adjustment` for this submission or escalate for rubric review
 
 Preview the grade:
 - Call `tool_apply_grade(..., confirm_write=False)`
+
+Preview and debugging note:
+- The write tools internally send JSON-based grade payloads. The agent does not need to construct these payloads manually, but if a preview or write behaves unexpectedly, inspect the exact rubric item IDs, point adjustment, and comment being passed rather than assuming a frontend-style form submission model.
 
 Show the user:
 - Student name and submission ID
@@ -170,6 +205,62 @@ Confidence policy:
 - `confidence < 0.6`: do not attempt to post; skip for human review
 - `0.6 <= confidence < 0.8`: use caution and tell the user it is borderline
 - `confidence >= 0.8`: acceptable for normal approval flow
+
+### 6A. Submission-Specific Adjustments
+
+Use `point_adjustment` when:
+- The current submission has a defensible edge case that the existing rubric does not express well
+- The exception is local to this submission and should not become a reusable rubric rule
+- The rubric is mostly correct and only needs a narrow one-off correction
+
+Do not use `point_adjustment` when:
+- The same gap is likely to recur across many submissions
+- The issue reveals that the rubric itself is incomplete or poorly structured
+- You are compensating for uncertainty instead of making a precise grading judgment
+
+Decision rule:
+1. Try to grade with `rubric_item_ids` alone.
+2. If that is insufficient, ask whether the gap is reusable across multiple submissions.
+3. If reusable, pause and escalate to rubric review.
+4. If it is clearly a one-off case, use `point_adjustment` with a specific explanation.
+
+Adjustment discipline:
+- Every `point_adjustment` must include a concise reason explaining why the rubric alone was insufficient.
+- If similar adjustments appear repeatedly on the same question, stop using ad hoc adjustments and escalate for rubric review.
+
+### 6B. Subagent Delegation Policy
+
+Subagents may be used to reduce context pressure and parallelize grading work.
+
+Subagents are good for:
+- OCR and page-reading work for scanned submissions
+- Single-question grading loops
+- Independent answer-group evaluation
+- Drafting grading proposals for a bounded set of submissions
+
+Main agent responsibilities:
+- Define the grading basis, rubric interpretation, and scoring convention
+- Keep global consistency across submissions and questions
+- Decide when a recurring issue requires rubric review
+- Handle user approval flow and any final escalation decisions
+
+Subagent permissions:
+- A subagent may read, assess, preview, and if explicitly authorized by the main agent, execute grading actions for its assigned submissions or groups
+- A subagent should not mutate the rubric unless the main agent explicitly delegates that exact rubric task
+- A subagent should not invent its own scoring convention; it must follow the main agent's grading contract
+
+Subagent prompt contract should include:
+- The exact `course_id`, `assignment_id`, `question_id`, and scoped `submission_id` or `group_id`
+- Whether the question should be treated as negative scoring by default
+- The approved reference answer or grading basis
+- The rubric interpretation
+- The confidence threshold for skipping
+- Whether the subagent may execute writes or only preview them
+
+When a subagent finds rubric insufficiency:
+- If the issue is one-off, it may use `point_adjustment` with a specific reason
+- If the issue appears reusable or likely to recur, it must stop and return the case to the main agent for rubric review
+- If uncertainty is high, it must skip rather than compensate with an arbitrary adjustment
 
 ### 7. Post-Grading
 
@@ -189,6 +280,12 @@ At the end:
 - Treat missing structured reference answers on scanned PDF assignments as normal, not as an extraction failure.
 - `tool_get_extensions` may be unsupported for some exam-style or scanned PDF assignments even for instructors; do not block grading on that tool.
 - If the user supplies reference answers, preserve them in `/tmp` and use them consistently across all submissions in that run.
+- At the start of a new conversation, do not assume prior `/tmp` reference files still exist. Rebuild them or ask the user to provide them again.
+- Before grading, verify whether the question is positive-scoring or negative-scoring. Using the wrong rubric sign convention will systematically misgrade the entire question.
+- For write previews, show the exact rubric item IDs, point adjustment, and comment you intend to send so the user can approve the actual mutation, not a paraphrase.
+- Unless the question clearly uses positive scoring, default to deduction-based reasoning and treat full credit as zero deduction.
+- Do not use submission-specific adjustments as a substitute for fixing a broken rubric that affects multiple students.
+- The save-grade endpoint expects a JSON payload with `rubric_items` and `question_submission_evaluation` keys. If grading fails with HTTP 500, verify the payload format matches the expected JSON structure rather than form-encoded data.
 
 ## Minimal Tool Order
 
@@ -204,7 +301,7 @@ Use this default order unless the user directs otherwise:
 8. Batch path:
    `tool_get_answer_group_detail` -> preview -> user approval -> execute
 9. Individual path:
-   `tool_get_next_ungraded` -> `tool_get_submission_grading_context` -> `tool_smart_read_submission` if needed -> preview -> user approval -> execute
+   `tool_get_next_ungraded` -> `tool_get_submission_grading_context(output_format="json")` -> `tool_assess_submission_readiness` if needed -> `tool_smart_read_submission` if needed -> `tool_cache_relevant_pages` if needed -> preview -> user approval -> execute
 10. `tool_get_assignment_statistics`
 
 ## Failure Handling
@@ -213,3 +310,4 @@ Use this default order unless the user directs otherwise:
 - `404` on a submission: re-orient with `tool_get_next_ungraded`; the caller may have used a global submission ID
 - Repeated low-confidence or skipped cases on the same question: pause that question and ask for user guidance
 - If more than roughly 30% of a question's submissions are being skipped, stop auto-grading that question and escalate
+- If a preview shows an unintended empty rubric state, stop. That usually means `rubric_item_ids=[]` was passed when `None` was intended.

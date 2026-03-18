@@ -183,7 +183,7 @@ def get_submission_grading_context(
             "submission_id": submission_id,
             "question_title": question.get("title", ""),
             "weight": question.get("weight"),
-            "scoring_type": question.get("scoring_type", "positive"),
+            "scoring_type": question.get("scoring_type", "negative"),
             "student": submission.get("owner_names", "Unknown"),
             "score": submission.get("score"),
             "graded": submission.get("graded", False),
@@ -230,8 +230,12 @@ def get_submission_grading_context(
     lines.append(f"**Graded:** {submission.get('graded', False)}")
 
     # Scoring type
-    scoring_type = question.get("scoring_type", "positive")
+    scoring_type = question.get("scoring_type", "negative")
     lines.append(f"**Scoring:** {scoring_type} (floor={question.get('floor')}, ceiling={question.get('ceiling')})")
+    if scoring_type == "positive":
+        lines.append("  ↳ _Rubric items **add** points. Select the items the student earned._")
+    else:
+        lines.append("  ↳ _Starts at full marks. Rubric items **deduct** points for errors._")
 
     # Current evaluation (comments + point adjustment)
     if evaluation:
@@ -367,7 +371,7 @@ def get_question_rubric(course_id: str, question_id: str) -> str:
         return f"No rubric items found for question `{question_id}`. You can create them with `tool_create_rubric_item`."
 
     weight = question.get("weight", "?")
-    scoring_type = question.get("scoring_type", "positive")
+    scoring_type = question.get("scoring_type", "negative")
 
     lines = [f"## Rubric for Question `{question_id}`\n"]
     lines.append(f"**Weight:** {weight} pts")
@@ -493,38 +497,45 @@ def apply_grade(
         # Keep current state
         apply_ids = {str(e["rubric_item_id"]) for e in current_evals if e.get("present")}
 
-    # Build the payload matching what the frontend sends
-    payload = {}
-
-    # Rubric evaluations
+    # Build the JSON payload matching what the Gradescope frontend sends.
+    # Structure: {"rubric_items": {"ID": {"score": "true"/"false"}, ...},
+    #             "question_submission_evaluation": {"points": ..., "comments": ...}}
+    rubric_items_payload = {}
     for ri in rubric_items:
         rid = str(ri["id"])
-        present = rid in apply_ids
-        payload[f"rubric_item_ids[{rid}]"] = "true" if present else "false"
+        rubric_items_payload[rid] = {
+            "score": "true" if rid in apply_ids else "false"
+        }
 
-    # Point adjustment
-    if point_adjustment is not None:
-        payload["points"] = str(point_adjustment)
-    elif current_eval.get("points") is not None:
-        payload["points"] = str(current_eval["points"])
+    resolved_points = (
+        point_adjustment if point_adjustment is not None
+        else current_eval.get("points")
+    )
+    resolved_comments = (
+        comment if comment is not None
+        else current_eval.get("comments")
+    )
 
-    # Comment
-    if comment is not None:
-        payload["comment"] = comment
-    elif current_eval.get("comments"):
-        payload["comment"] = current_eval["comments"]
+    json_payload = {
+        "rubric_items": rubric_items_payload,
+        "question_submission_evaluation": {
+            "points": resolved_points,
+            "comments": resolved_comments,
+        },
+    }
 
     # POST to save_grade
     headers = {
         "X-CSRF-Token": csrf_token,
-        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
         "X-Requested-With": "XMLHttpRequest",
     }
 
     try:
         resp = session.post(
             f"{base_url}{save_url}",
-            data=payload,
+            json=json_payload,
             headers=headers,
         )
     except Exception as e:
@@ -559,11 +570,20 @@ def create_rubric_item(
 
     **WARNING**: This modifies the rubric. Changes apply to ALL submissions.
 
+    Weight semantics depend on the question's scoring type:
+    - **Positive scoring:** Items ADD points. Use positive weights (e.g., 5.0
+      for ``Correct answer``). The total score is the sum of applied items.
+    - **Negative scoring:** Items DEDUCT points from the max. Use negative
+      weights (e.g., -2.0 for ``Missing units``).
+
+    Check the scoring type with ``get_question_rubric`` or
+    ``get_submission_grading_context`` before creating items.
+
     Args:
         course_id: The Gradescope course ID.
         question_id: The question ID.
-        description: Description of the rubric item (e.g., "Missing explanation").
-        weight: Point value (positive for bonus, negative/0 for deductions).
+        description: Description of the rubric item (e.g., "Correct answer").
+        weight: Point value — see scoring-type note above.
         confirm_write: Must be True to create the rubric item.
     """
     if not course_id or not question_id or not description:
