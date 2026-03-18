@@ -16,7 +16,7 @@ Use this skill when grading through the Gradescope MCP server. The workflow is a
 - Preserve user authority. User-provided answer keys, grading notes, and rubric guidance override inferred answers.
 - Prefer structured output. When a tool supports `output_format`, prefer `output_format="json"` for planning and decision-making.
 - Do not confuse "leave unchanged" with "clear". In `tool_apply_grade` and `tool_grade_answer_group`, `rubric_item_ids=None` means keep current rubric state, while `rubric_item_ids=[]` means clear all rubric items.
-- Default to deduction logic. Unless the question clearly indicates otherwise, assume the grading mindset is negative scoring: start from full credit, use rubric items as deductions, and treat `correct` or equivalent full-credit states as `0` deduction.
+- Default to deduction logic. Unless the question clearly indicates otherwise, assume the grading mindset is negative scoring: start from full credit, select rubric items for mistakes found. Rubric weights are always **positive numbers** — Gradescope's `scoring_type` determines whether items add or deduct.
 - Default to preserving existing grades. If a submission already appears graded, skip it unless the user explicitly asks for regrading, audit, or overwrite behavior.
 
 ## When To Use
@@ -77,9 +77,11 @@ Use the artifact to gather:
 
 Scoring mode auto-detection:
 - Before grading any question, read the `scoring_type` from `tool_get_submission_grading_context` or `tool_prepare_grading_artifact`. The grading context explicitly states the scoring direction.
-- If the scoring type is `positive`, rubric items add earned points. Select the credit the student deserves.
+- If the scoring type is `positive`, rubric items add earned points. Select the items the student earned.
 - If the scoring type is `negative` (or absent — Gradescope defaults to negative), rubric items deduct from full marks. Select the mistakes found.
-- If the rubric weights conflict with the stated scoring type (e.g., positive-weight items on a negative-scoring question), stop and ask the user before grading. This likely indicates a misconfigured rubric.
+- **Rubric weights are always positive numbers.** Gradescope handles the sign internally based on `scoring_type`. For example, a deduction item with `weight=2.0` means the student loses 2 points when this mistake is checked. The web UI shows this as `-2`.
+- Never pass negative weight values when creating rubric items.
+- If the rubric weights conflict with the stated scoring type, stop and ask the user before grading. This likely indicates a misconfigured rubric.
 - Never begin grading a question without confirming its scoring mode. Using the wrong convention will systematically misgrade every submission.
 
 Reference priority order:
@@ -94,7 +96,8 @@ If the rubric is incomplete or unclear:
 - Explain why each new or changed item is needed.
 - Ask the user to approve the rubric mutation.
 - State whether the question is positive-scoring or negative-scoring so the proposed weights use the correct sign.
-- Default proposed rubric weights to negative values unless the question clearly uses positive scoring.
+- Rubric weights are always positive values. For negative scoring, `weight=2.0` means "deduct 2 points" and the web UI shows `-2`.
+- Default proposed rubric weights to positive values. Do not pass negative weight values to `create_rubric_item`.
 
 Only after approval:
 - Call `tool_create_rubric_item(..., confirm_write=True)` for new items
@@ -348,9 +351,10 @@ At the end:
 - `tool_get_extensions` may be unsupported for some exam-style or scanned PDF assignments even for instructors; do not block grading on that tool.
 - If the user supplies reference answers, preserve them in `/tmp` and use them consistently across all submissions in that run.
 - At the start of a new conversation, do not assume prior `/tmp` reference files still exist. Rebuild them or ask the user to provide them again.
-- Before grading, verify whether the question is positive-scoring or negative-scoring. Using the wrong rubric sign convention will systematically misgrade the entire question.
+- Before grading, verify whether the question is positive-scoring or negative-scoring. Rubric weights are always positive in Gradescope; the `scoring_type` determines interpretation.
 - For write previews, show the exact rubric item IDs, point adjustment, and comment you intend to send so the user can approve the actual mutation, not a paraphrase.
 - Unless the question clearly uses positive scoring, default to deduction-based reasoning and treat full credit as zero deduction.
+- Do not pass negative weight values to `create_rubric_item` or `update_rubric_item`. Gradescope expects positive numbers and handles the sign based on `scoring_type`.
 - Do not use submission-specific adjustments as a substitute for fixing a broken rubric that affects multiple students.
 - The save-grade endpoint expects a JSON payload with `rubric_items` and `question_submission_evaluation` keys. If grading fails with HTTP 500, verify the payload format matches the expected JSON structure rather than form-encoded data.
 

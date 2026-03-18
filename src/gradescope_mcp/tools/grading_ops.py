@@ -233,9 +233,9 @@ def get_submission_grading_context(
     scoring_type = question.get("scoring_type", "negative")
     lines.append(f"**Scoring:** {scoring_type} (floor={question.get('floor')}, ceiling={question.get('ceiling')})")
     if scoring_type == "positive":
-        lines.append("  ↳ _Rubric items **add** points. Select the items the student earned._")
+        lines.append("  ↳ _Rubric items **add** points. Weight values are positive (e.g., `5.0` = +5 earned)._")
     else:
-        lines.append("  ↳ _Starts at full marks. Rubric items **deduct** points for errors._")
+        lines.append("  ↳ _Starts at full marks. Rubric items **deduct** points. Weight values are positive (e.g., `2.0` = −2 deducted). Gradescope handles the sign internally._")
 
     # Current evaluation (comments + point adjustment)
     if evaluation:
@@ -570,11 +570,15 @@ def create_rubric_item(
 
     **WARNING**: This modifies the rubric. Changes apply to ALL submissions.
 
-    Weight semantics depend on the question's scoring type:
-    - **Positive scoring:** Items ADD points. Use positive weights (e.g., 5.0
-      for ``Correct answer``). The total score is the sum of applied items.
-    - **Negative scoring:** Items DEDUCT points from the max. Use negative
-      weights (e.g., -2.0 for ``Missing units``).
+    Weight is always a **positive** number. Gradescope uses the question's
+    ``scoring_type`` to determine interpretation:
+    - **Positive scoring:** Weight = points earned (e.g., ``5.0`` → student
+      gets +5 when this item is applied).
+    - **Negative scoring:** Weight = points deducted (e.g., ``2.0`` → student
+      loses −2 when this item is applied). The web UI shows this as ``-2``.
+
+    **Do NOT pass negative weight values.** Gradescope expects positive
+    numbers and handles the sign internally based on ``scoring_type``.
 
     Check the scoring type with ``get_question_rubric`` or
     ``get_submission_grading_context`` before creating items.
@@ -583,7 +587,7 @@ def create_rubric_item(
         course_id: The Gradescope course ID.
         question_id: The question ID.
         description: Description of the rubric item (e.g., "Correct answer").
-        weight: Point value — see scoring-type note above.
+        weight: Point value — always positive. See scoring-type note above.
         confirm_write: Must be True to create the rubric item.
     """
     if not course_id or not question_id or not description:
