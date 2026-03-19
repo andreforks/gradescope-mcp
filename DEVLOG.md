@@ -1,7 +1,64 @@
 # Gradescope MCP — Development Log
 
-> This file tracks the development progress, decisions, and findings.
-> Referenced by `AGENT.md` to ensure future agents have full context.
+> This file records implementation history, behavior changes, and project-level
+> documentation updates. `AGENT.md` should stay aligned with the current state
+> summarized here.
+
+---
+
+## Session 9 — 2026-03-18: Full Project Audit And Documentation Refresh
+
+### What was done
+
+1. Read through the full repository structure, server registration layer, core
+   tool modules, workflow helpers, tests, and operator-facing docs.
+2. Reconciled the documented project state with the actual code in
+   `src/gradescope_mcp/server.py`.
+3. Updated all primary human-readable project files so they reflect the current
+   implementation instead of older snapshots.
+
+### Documentation fixes
+
+- `README.md`
+  - Rewritten around the current architecture and real feature set
+  - Tool inventory corrected and reorganized by workflow
+  - Current counts corrected to **34 tools**, **3 resources**, **7 prompts**
+  - Added architecture, constraints, ID semantics, scoring semantics, and
+    scanned-assignment notes
+  - Added current test count: **30 automated tests**
+
+- `AGENT.md`
+  - Rewritten as an accurate maintainer/developer guide
+  - Corrected tool counts, test counts, and module responsibilities
+  - Added explicit maintenance rule to keep docs in sync with server changes
+
+- `OPERATIONS_LOGS/RECORDS.md`
+  - Converted from a minimal placeholder into a clearer mutation-log template
+  - Added logging rules for sensitive data handling and rollback expectations
+
+- `.env.example`
+  - Clarified that `.env` is loaded automatically by the module entry point
+  - Kept the credential surface minimal
+
+- `pyproject.toml`
+  - Updated the package description to better match the actual server scope
+
+### Audit findings
+
+- The server currently registers **34** `@mcp.tool()` functions.
+- The repository currently contains **30** test functions across 5 test files.
+- Earlier docs still mentioned **32** or **33** tools and older test totals.
+- The codebase's main operational constraints are:
+  - preview-first writes with `confirm_write=True` gating
+  - Global Submission ID vs Question Submission ID distinction
+  - positive vs negative scoring semantics with always-positive rubric weights
+  - `/tmp` as ephemeral cache for grading artifacts and answer-key material
+
+### Current state
+
+- **34 tools** + **3 resources** + **7 prompts**
+- **30 automated tests**
+- Core docs synchronized with the implementation as of 2026-03-18
 
 ---
 
@@ -47,8 +104,8 @@
 - `test_positive_scoring_context_shows_add_hint` — verifies positive scoring shows "add points" hint
 
 ### Test results
-- **20 automated tests** — all passing
-- 5 test files (unchanged)
+- **20 automated tests** at the time of this session — all passing
+- 5 test files
 
 ### Files modified
 | File | Changes |
@@ -92,7 +149,7 @@
 
 ### Current state
 - **33 tools** + **3 resources** + **7 prompts**
-- 20 automated tests (all passing)
+- 20 automated tests (all passing at that point)
 
 ---
 
@@ -113,7 +170,7 @@ Systematic code review identified 12+ potential bugs; 10 were confirmed as real 
 
 3. **`prepare_grading_artifact` fabricates "reference answer available"** (`grading_workflow.py`):
    - Rubric-drafted fallback text was passed to `_compute_readiness()` as a real reference answer, inflating the score by +0.2.
-   - Fix: only real `explanation` goes into readiness scoring. The rubric draft is labeled "⚠️ Rubric-Based Fallback" in the artifact.
+   - Fix: only real `explanation` goes into readiness scoring. The rubric draft is labeled "Rubric-Based Fallback" in the artifact.
 
 4. **Readiness score inconsistency** (`grading_workflow.py`):
    - Same root cause as item 3. Both `prepare_grading_artifact` and `assess_submission_readiness` now produce identical scores.
@@ -128,7 +185,7 @@ Systematic code review identified 12+ potential bugs; 10 were confirmed as real 
 7. **`apply_grade` / `grade_answer_group` rubric_item_ids coercion** (`grading_ops.py`, `answer_groups.py`):
    - MCP clients sometimes pass a single string `"123"` instead of `["123"]`. Both functions now auto-wrap strings into lists.
 
-#### Medium/Low-priority fixes
+#### Medium / low-priority fixes
 8. **`get_answer_groups` markdown "Type: (not set)"** (`answer_groups.py`):
    - Falls back to per-group `question_type` when `assisted_grading_type` is None. Added Type column to the table.
 
@@ -142,8 +199,8 @@ Systematic code review identified 12+ potential bugs; 10 were confirmed as real 
     - All 3 "no reference answer" messages now explain this is expected for scanned PDF / handwritten assignments, not an extraction failure.
 
 ### Test results
-- **18 automated tests** — all passing
-- 5 test files: `test_write_safety.py`, `test_grading_workflow.py`, `test_answer_groups.py`, `test_assignments_and_grading_ops.py`, `test_extensions_and_answer_key.py`
+- **18 automated tests** — all passing at the time of this session
+- 5 test files
 
 ### Files modified
 | File | Changes |
@@ -158,7 +215,7 @@ Systematic code review identified 12+ potential bugs; 10 were confirmed as real 
 
 ### Current state
 - **32 tools** + **3 resources** + **7 prompts**
-- 18 automated tests (all passing)
+- 18 automated tests (all passing at that point)
 
 ---
 
@@ -178,7 +235,7 @@ Systematic code review identified 12+ potential bugs; 10 were confirmed as real 
 
 3. **JSON Output Mode**:
    - `get_submission_grading_context` now accepts `output_format="json"` for structured data
-   - Returns parsed rubric items, navigation, answer group, progress, pages, crops
+   - Returns parsed rubric items, navigation, answer_group, progress, pages, crops
    - `get_answer_groups` and `get_answer_group_detail` also support JSON mode
 
 ### Key API discoveries
@@ -190,16 +247,16 @@ Systematic code review identified 12+ potential bugs; 10 were confirmed as real 
 ### Test results
 | Tool | Test Data | Result |
 |------|-----------|--------|
-| `get_answer_groups` (markdown) | Q5a (midterm) | ✅ 20 groups × 164 submissions |
-| `get_answer_groups` (JSON) | Q5a | ✅ Structured JSON with group sizes |
-| `get_submission_grading_context` (JSON) | Q5a sub | ✅ rubric_items, navigation, answer_group parsed |
-| `update_rubric_item` (dry run) | Q5a | ✅ Cascade warning shown |
-| `delete_rubric_item` (dry run) | Q5a | ✅ Cascade warning shown |
-| `grade_answer_group` (dry run) | mocked | ✅ Confirmation gate with group_size |
+| `get_answer_groups` (markdown) | Q5a (midterm) | OK |
+| `get_answer_groups` (JSON) | Q5a | OK |
+| `get_submission_grading_context` (JSON) | Q5a sub | OK |
+| `update_rubric_item` (dry run) | Q5a | OK |
+| `delete_rubric_item` (dry run) | Q5a | OK |
+| `grade_answer_group` (dry run) | mocked | OK |
 
 ### Current state
 - **32 tools** + **3 resources** + **7 prompts**
-- 10 automated tests (all passing)
+- 10 automated tests (all passing at that point)
 
 ---
 
@@ -214,294 +271,18 @@ Systematic code review identified 12+ potential bugs; 10 were confirmed as real 
    - `tool_apply_grade(..., confirm_write=False)`
    - `tool_create_rubric_item(..., confirm_write=False)`
 2. Fixed upload path validation:
-   - uploads now require **absolute** paths
-   - removed the ineffective post-`resolve()` `..` traversal check
+   - uploads now require absolute paths
 3. Hardened scanned-page caching:
-   - `cache_relevant_pages()` now downloads page images through the authenticated
-     Gradescope session instead of `urllib.request.urlopen`
-4. Added the first automated test suite:
-   - write confirmation tests
-   - upload path validation test
-   - cached page download/authenticated session test
-5. Synced project docs:
-   - `README.md` and `AGENT.md` now reflect **27 tools** and **7 prompts**
-   - documented the `confirm_write=True` requirement
+   - `cache_relevant_pages()` now downloads page images through the authenticated Gradescope session instead of a separate unauthenticated stack
+4. Added the first automated test suite
+5. Synced project docs at that time
 
 ### Why this matters for agents
-- A default-deny write path is a better fit for MCP clients, where LLMs may call
-  tools speculatively or before the user has explicitly approved a mutation.
-- The server now behaves more like a two-step workflow:
+- Default-deny writes are a better fit for MCP clients, where LLMs may call
+  tools speculatively.
+- The server now behaves as:
   1. preview intended mutation
   2. execute only with `confirm_write=True`
-- Authenticated page downloads are more reliable for sandboxed/short-lived
-  signed URLs and avoid a separate unauthenticated HTTP stack.
 
-### Remaining gaps
-- No structured JSON mode yet for high-volume read tools such as roster/scores.
-- Live read-only validation still depends on the local `.env` credentials and
-  network availability in the execution environment.
-
-## Session 1 — 2026-03-17: Initial Implementation
-
-### What was done
-1. **Project initialization**: `uv init`, added deps (`mcp`, `gradescopeapi`, `python-dotenv`), configured `hatchling` src layout in `pyproject.toml`.
-2. **Implemented 12 MCP tools**, 3 resources, 3 prompts:
-   - See `AGENT.md` for full tool list.
-3. **Live-tested** against real Gradescope account (UCI, instructor for STATS 67 etc.).
-
-### Test results
-| Tool | Status | Notes |
-|------|--------|-------|
-| `list_courses` | ✅ | 9 instructor + 5 student courses returned |
-| `get_assignments` | ✅ | 15 assignments for STATS 67 W26 (course `1205064`) |
-| `get_course_roster` | ✅ | 170 members parsed correctly |
-| `get_extensions` | ✅ | Returns empty correctly when no extensions exist |
-| Others | 🔲 | Not yet live-tested (need specific scenarios) |
-
-### Bug found & fixed: `gradescopeapi` roster parsing
-- **Symptom**: `get_course_users()` silently returns `None`.
-- **Root cause**: In `_course_helpers.py:172`, the library hardcodes `num_submissions_column = 4 if has_sections else 3`, but the actual Gradescope table now has 9 columns (added Canvas column, dual name columns, etc.). It tries `int("stats-67-lec-b-...")` and crashes. The `account.py:get_course_users` catches all exceptions with bare `except Exception: return None`.
-- **Fix**: Wrote a custom parser in `tools/courses.py` (`_parse_roster()`) that:
-  - Detects the "Submissions" column by matching header text.
-  - Parses `data-sections` as JSON (now a JSON array, not a plain string).
-  - Extracts `user_id` from `js-rosterName` button's `data-url`.
-  - Includes `user_id` in output so TAs can use `set_extension` easily.
-
-### Key architecture decisions
-- **`FastMCP`** (not raw `Server`): Simpler decorator-based tool registration.
-- **Singleton `GSConnection`** in `auth.py`: Avoids re-login per tool call.
-- **Custom roster parser**: Bypasses buggy `gradescopeapi` implementation.
-- **`FastMCP()` constructor**: v1.26 does NOT support `description` kwarg — removed it.
-- **`pyproject.toml`**: Uses `hatchling` build system with `[tool.hatch.build.targets.wheel] packages = ["src/gradescope_mcp"]` for src layout.
-- **`dependency-groups`**: `[tool.uv.dev-dependencies]` is deprecated → use `[dependency-groups]`.
-
-### Known limitations
-- `gradescopeapi` is web-scraping based — if Gradescope changes its HTML, tools may break.
-- `get_assignment_submissions` is slow for large classes (1 HTTP request per submission).
-- `remove_student_extension` is `NotImplementedError` upstream.
-- Image/PDF-only submissions are not supported by gradescopeapi.
-- Resource templates (`gradescope://courses/{id}/...`) register as templates, not static resources.
-
----
-
-## Pending / Future Work
-- [ ] Test `upload_submission`, `set_extension`, `modify_assignment_dates` with real data
-- [ ] Test `get_assignment_submissions` and `get_student_submission` (instructor-only)
-- [ ] Add error retry logic for network failures
-- [ ] Consider session expiration handling (auto re-login)
-- [ ] Phase 5c: Outline save endpoint (experimental write operation)
-- [ ] Publish to PyPI
-
----
-
-## Session 2 — 2026-03-17: Grading Tools + AI Rubric Prompts
-
-### What was done
-1. **Added 4 instructor tools** (Phase 4 expansion): `rename_assignment`, `get_assignment_submissions`, `get_student_submission`, `get_assignment_graders` → 12 total tools.
-2. **Reverse-engineered Gradescope grading endpoints**:
-   - `/outline/edit` → `AssignmentEditor` React component with full question hierarchy (IDs, types, weights, content text, answer keys)
-   - `/scores` → CSV export of per-question scores + student metadata
-   - `/export_evaluations` → ZIP of evaluation data
-   - `/grade.json` → Dashboard JSON with question links, grader assignments, graded counts
-   - `/questions/{qid}/submissions` → Per-question grading SPA (client-side rendered, no server-side React)
-   - The grading SPA is loaded via `common-*.js` webpack bundle (184 rubric-related code snippets found)
-   - Data model: `RubricItem` + `RubricItemGroup`, linked via annotations
-3. **Implemented Phase 5a — 3 grading tools** in `tools/grading.py`:
-   - `get_assignment_outline` — parses `AssignmentEditor` props for question tree
-   - `export_assignment_scores` — fetches `/scores` CSV, computes stats
-   - `get_grading_progress` — parses `/grade.json` for per-question progress
-4. **Implemented Phase 5b — 2 AI prompts**:
-   - `generate_rubric_from_outline` — AI generates rubric from question structure
-   - `grade_submission_with_rubric` — AI grades a student's submission
-
-### Test results
-| Tool | Status | Notes |
-|------|--------|-------|
-| `get_assignment_outline` | ✅ | 22 questions in 4 groups, question text + answer keys extracted |
-| `export_assignment_scores` | ✅ | 166 students, 157 graded, avg 16.63/18, min 2.0, max 18.0 |
-| `get_grading_progress` | ✅ | 100% graded (2826/2826), shows grader assignments (John Henry Lain) |
-| `generate_rubric_from_outline` | ✅ registered | Prompt-based, needs end-to-end testing in AI client |
-| `grade_submission_with_rubric` | ✅ registered | Prompt-based, needs end-to-end testing in AI client |
-
-### Reverse engineering notes
-- **No public rubric API**: Gradescope has no `rubric_items.json` or similar endpoint. The rubric data is loaded client-side by the React SPA via XHR calls made from the `common-*.js` webpack bundle.
-- **Endpoint probing results** (using `assignment_id=7743243`):
-  - `GET /scores` → 200, text/csv (per-question grades)
-  - `GET /export_evaluations` → 200, application/zip
-  - `GET /grade.json` → 200, JSON (dashboard data)
-  - `GET /outline/edit` → 200, HTML with `AssignmentEditor` React props
-  - `POST /outline` → saveUrl for assignment editor (untested, risky)
-  - `GET /rubric`, `/rubric_items`, `/scores.json` → 404
-- **JS bundle analysis**: The `common-*.js` bundle contains `RubricItem`, `RubricItemGroup`, `QuickMarkTemplate` types with annotation-based grading. Rubric items are linked to submissions via `annotationLinkType`.
-
-### Current state
-- **15 tools** + **1 resource** + **2 resource templates** + **5 prompts**
-- All tools live-tested (except write operations and AI prompts)
-
----
-
-## Session 2 (continued) — Submission Content Extraction
-
-### What was done
-1. **Implemented `get_student_submission_content()`** — unified function to extract submission content:
-   - **Online assignments**: Parses `AssignmentSubmissionViewer` React component props for text answers + AWS S3 image URLs
-   - **Scanned PDF exams**: Extracts per-page JPG images + full PDF URL via regex on embedded JSON in raw HTML
-2. **Replaced buggy `gradescopeapi.get_assignment_submission`** — the upstream function had an `UnboundLocalError` for `aws_links` and silently failed on PDF/image submissions.
-3. **Rewired `tool_get_student_submission`** in `submissions.py` to use the new custom implementation.
-
-### Test results
-| Format | Assignment | Status | Details |
-|--------|-----------|--------|---------|
-| Online | hw9-regression (W26) | ✅ | 18 question answers extracted, 4 image URLs (PNG screenshots) |
-| Scanned PDF | midterm (F25) | ✅ | 16 page JPGs (2332×3297) + full PDF URL extracted |
-| Online (regression) | Same student as before | ✅ | Backward compatible, same output as before |
-
-### Key findings
-- **Online assignments**: Use `AssignmentSubmissionViewer` React component with `question_submissions` array and `text_files` array
-- **Scanned PDF exams**: No React components at all (0 found). Page data embedded as JSON in single-line HTML. Pattern: `"number":N,"width":W,"height":H,"url":"...page_N.jpg..."`
-- **PDF attachment**: Scanned exams also include full PDF at `"url":"...output.pdf..."` with `page_count` metadata
-
----
-
-## Session 3 — Regrade Requests & Statistics
-
-### Phase 6: Regrade Requests ✅
-- **New module:** `tools/regrades.py`
-- **`get_regrade_requests`**: Parses `/assignments/{id}/regrade_requests` HTML table → student, question, grader, status, question_id, submission_id
-- **`get_regrade_detail`**: Parses `SubmissionGrader` React component from `/questions/{qid}/submissions/{sid}/grade` → student_comment, staff_comment, rubric items, evaluations
-- **`review_regrade_requests`** prompt: AI reviews all pending requests vs rubric
-
-### Phase 7: Assignment Statistics ✅
-- **New module:** `tools/statistics.py`
-- **`get_assignment_statistics`**: Fetches `/statistics.json` → assignment-level summary (mean/median/min/max/std) + per-question breakdowns + low-scoring question alerts
-
-### Test results
-| Tool | Test Data | Result |
-|------|-----------|--------|
-| `get_regrade_requests` | STATS 67 F25 midterm | ✅ 10 pending requests listed |
-| `get_regrade_detail` | Q5a regrade (student argued correct labeling) | ✅ Student + staff comments extracted |
-| `get_assignment_statistics` | Same midterm | ✅ Mean 87.3%, Q2a flagged at 64% |
-
-### Current state
-- **22 tools** + **3 resources** + **6 prompts**
-- All tools live-tested
-
-### Phase 8: Grading Write Operations ✅
-- **New module:** `tools/grading_ops.py`
-- `get_submission_grading_context`: Rubric items (IDs), score, point adjustment, comments, navigation URLs, scanned pages
-- `apply_grade`: POST to `save_grade` with CSRF → apply rubric items + point adjustment + comment
-- `create_rubric_item`: POST to `rubric_items` → create new rubric items
-- `get_next_ungraded`: Navigate via `next_ungraded` URL
-
-#### Key endpoints discovered
-- `urls` dict: 26 endpoints (`save_grade`, `rubric_item`, `save_comment_url`, `update_rubric_entries`)
-- `evaluation`: `points` (adjustment), `comments`, `question_submission_id`
-- `navigation_urls`: 18 links (`previous_ungraded`, `next_ungraded`, `next_alphabetical`, etc.)
-- CSRF: `<meta name="csrf-token">` tag
-
----
-
-## Session 4 — 2026-03-17: Agent-Oriented Grading Workflow
-
-### What was done
-1. **Fixed a real grading context bug** in `tools/grading_ops.py`:
-   - `question.parameters` can be `None` on real grading pages.
-   - `get_submission_grading_context()` previously crashed with `AttributeError`.
-   - Added a null-safe fallback before reading `crop_rect_list`.
-2. **Added `tools/grading_workflow.py`** for agent-friendly grading preparation:
-   - `prepare_grading_artifact(course_id, assignment_id, question_id, submission_id=None)`
-     writes `/tmp/gradescope-grading-{assignment_id}-{question_id}.md`
-   - `assess_submission_readiness(course_id, assignment_id, question_id, submission_id)`
-     returns a crop-first read plan and confidence gate
-   - `cache_relevant_pages(course_id, assignment_id, question_id, submission_id)`
-     downloads only the crop page and adjacent pages to `/tmp`
-3. **Registered 3 new MCP tools** in `server.py`:
-   - `tool_prepare_grading_artifact`
-   - `tool_assess_submission_readiness`
-   - `tool_cache_relevant_pages`
-4. **Updated packaging/docs**:
-   - Added explicit `beautifulsoup4` dependency to `pyproject.toml`
-   - Updated `README.md` tool count and grading workflow docs
-
-### Workflow design decisions
-- **OCR stays in the agent, not the MCP server**:
-  - The server should provide crop coords, page images, rubric, reference notes,
-    and confidence gates.
-  - The agent should perform visual reading / OCR / answer interpretation.
-- **Crop-first read order**:
-  1. Read crop region only
-  2. If answer looks truncated or exits the box, read the whole page
-  3. If still incomplete, inspect previous and next page
-- **Context minimization**:
-  - Artifact/readiness outputs now keep only the crop page and immediate neighbors
-    instead of dumping all submission pages.
-- **Confidence gate**:
-  - `auto_grade_ok`
-  - `review_before_write`
-  - `skip_or_human_review`
-
-### Real-world tests performed
-#### Test A — Real grading page read
-- URL tested:
-  `/courses/1205064/questions/67345805/submissions/3753176143/grade`
-- Result:
-  - Successfully fetched rubric + score state
-  - Found this was an **ungraded** 5-point question
-  - Confirmed write-path testing should not proceed without explicit grading intent
-
-#### Test B — Real scanned final exam prompt extraction
-- Assignment:
-  `7843953`
-- Located `Question 4` from `grade.json`:
-  - `Q4.1` → `67943014`
-  - `Q4.2` → `67943015`
-  - `Q4.3` → `67943016`
-  - `Q4.4` → `67943017`
-- Downloaded and inspected page 4/page 5 images
-- Successfully reconstructed the prompt text for Question 4 from scanned pages
-
-#### Test C — Real workflow generation for Q4.3
-- `prepare_grading_artifact('1205064', '7843953', '67943016')`
-  → created:
-  `/tmp/gradescope-grading-7843953-67943016.md`
-- `assess_submission_readiness('1205064', '7843953', '67943016', '3775836425')`
-  → returned a low-confidence recommendation:
-  `skip_or_human_review`
-- `cache_relevant_pages('1205064', '7843953', '67943016', '3775836425')`
-  → downloaded:
-  - `/tmp/gradescope-pages-7843953-67943016-3775836425/page_4.jpg`
-  - `/tmp/gradescope-pages-7843953-67943016-3775836425/page_5.jpg`
-  - `/tmp/gradescope-pages-7843953-67943016-3775836425/page_6.jpg`
-
-### Current state
-- **27 tools** + **3 resources** + **7 prompts**
-- Read-side grading workflow is now much closer to agent use:
-  - prompt/rubric/reference artifact in `/tmp`
-  - crop-first read strategy
-  - adjacent-page fallback guidance
-  - confidence-based skip/escalate recommendation
-
-### Session 4 continuation — Smart Grading Pipeline
-
-#### New tools added
-- **`prepare_answer_key(course_id, assignment_id)`**: Extracts ALL questions from outline + grade.json → produces `/tmp/gradescope-answerkey-{assignment_id}.md`. Gracefully handles scanned exams (no AssignmentEditor). Identifies missing reference answers.
-- **`smart_read_submission(course_id, assignment_id, question_id, submission_id)`**: Returns 3-tier reading plan:
-  - Tier 1: Crop region only (with coordinates)
-  - Tier 2: Full page (if answer overflows crop)
-  - Tier 3: Adjacent pages (if still incomplete)
-  - Includes confidence score + recommended action
-  - Notes whether answer key is cached
-
-#### New prompt
-- **`auto_grade_question`**: Full workflow prompt: prepare answer key → prepare artifact → for each submission: smart read → assess confidence → apply grade → navigate next
-
-#### Test results
-| Tool | Test Data | Result |
-|------|-----------|--------|
-| `prepare_answer_key` | STATS 67 midterm (scanned) | ✅ 31 questions extracted, all missing answers noted |
-| `smart_read_submission` | Q5a submission | ✅ Tier 1: page 9 crop (17-28% × 15-40%), Tier 2: full page 9, Tier 3: pages 8+10. Confidence 0.35 → skip |
-
-### Remaining gaps / next steps
-- [ ] Add a structured `plan_grade_submission` tool that prepares a write-free grading proposal
-- [ ] Improve scanned-question prompt extraction so the artifact can store prompt text directly when page images are available
-- [ ] Replace heuristic confidence with stronger signals from actual answer coverage / cross-page detection
+### Remaining gaps noted at that time
+- No structured JSON mode yet for some high-volume read tools

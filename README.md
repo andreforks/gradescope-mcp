@@ -1,122 +1,229 @@
 # Gradescope MCP Server
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that enables AI assistants to interact with [Gradescope](https://www.gradescope.com/) for course management, grading, regrade reviews, and more.
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server for
+[Gradescope](https://www.gradescope.com/) that exposes course management,
+grading, regrade review, statistics, and AI-assisted grading workflows to MCP
+clients.
 
-Built for **instructors and TAs** who want to use AI agents (Claude, Gemini, etc.) for grading workflows.
+The server is designed for instructors and TAs who want to use AI agents with
+real Gradescope data while keeping write operations gated behind explicit
+confirmation.
 
-This repository now also includes a reusable grading skill at
-[`skills/gradescope-assisted-grading/SKILL.md`](skills/gradescope-assisted-grading/SKILL.md)
-that documents a human-approved grading workflow for scanned exams, rubric review,
-batch grading, and individual grading.
+This repository also includes a reusable local skill at
+`skills/gradescope-assisted-grading/SKILL.md` for human-approved grading
+workflows.
 
-## Features
+## Current Status
 
-### Tools (33 total)
+- 34 MCP tools
+- 3 MCP resources
+- 7 MCP prompts
+- 30 automated tests
+- Python 3.10+
+- Package manager: `uv`
 
-#### Core
+## What The Project Provides
+
+### Read-oriented workflows
+- Course discovery and assignment listing
+- Assignment outline parsing for online and scanned-PDF assignments
+- Roster inspection with a custom HTML parser
+- Submission listing for multiple assignment types
+- Grading progress, rubric context, answer groups, regrades, and statistics
+- Workflow helpers that cache grading artifacts and answer-key snapshots to
+  `/tmp`
+
+### Write-oriented workflows
+- Uploading submissions
+- Setting student extensions
+- Modifying assignment dates
+- Renaming assignments
+- Applying grades
+- Creating, updating, and deleting rubric items
+- Batch grading answer groups
+
+All write-capable tools are preview-first and require `confirm_write=True`
+before any mutation is executed.
+
+## Tool Inventory
+
+### Core
 | Tool | Description | Access |
 |------|-------------|--------|
-| `tool_list_courses` | List all courses (instructor & student) | All |
-| `tool_get_assignments` | Get assignments for a course | All |
-| `tool_get_assignment_details` | Get details of a specific assignment | All |
+| `tool_list_courses` | List all courses grouped by role | All |
+| `tool_get_assignments` | List assignments for a course | All |
+| `tool_get_assignment_details` | Get one assignment's details | All |
 | `tool_upload_submission` | Upload files to an assignment | All |
 
-#### Instructor/TA Management
+### Instructor / TA Management
 | Tool | Description |
 |------|-------------|
-| `tool_get_course_roster` | Full course roster grouped by role |
-| `tool_get_extensions` | View student extensions |
-| `tool_set_extension` | Add/update student extensions |
-| `tool_modify_assignment_dates` | Change assignment dates |
+| `tool_get_course_roster` | Full roster grouped by role |
+| `tool_get_extensions` | View assignment extensions |
+| `tool_set_extension` | Add or update one student's extension |
+| `tool_modify_assignment_dates` | Change release / due / late-due dates |
 | `tool_rename_assignment` | Rename an assignment |
-| `tool_get_assignment_submissions` | View all submissions |
-| `tool_get_student_submission` | Get a student's submission content (text + image URLs + scanned PDF pages, supports Online Assignments) |
+| `tool_get_assignment_submissions` | List assignment submissions |
+| `tool_get_student_submission` | Read one student's submission content |
 | `tool_get_assignment_graders` | View graders for a question |
 
-#### Grading — Read
+### Grading Read
 | Tool | Description |
 |------|-------------|
-| `tool_get_assignment_outline` | Question hierarchy with IDs, weights, and text |
-| `tool_export_assignment_scores` | Per-question scores + summary statistics |
+| `tool_get_assignment_outline` | Question hierarchy, IDs, weights, prompt text |
+| `tool_export_assignment_scores` | Assignment score export and summary |
 | `tool_get_grading_progress` | Per-question grading dashboard |
-| `tool_get_submission_grading_context` | Full grading context: student text answer, rubric items, score, comments, navigation. Supports JSON output. |
-| `tool_get_question_rubric` | Get rubric items for a question without needing a submission ID |
-| `tool_prepare_grading_artifact` | Save prompt/rubric/reference notes to `/tmp` for context-efficient grading |
-| `tool_assess_submission_readiness` | Crop-first read plan + readiness gate for auto-grading |
-| `tool_cache_relevant_pages` | Download crop page and adjacent pages to `/tmp` for local/vision review |
-| `tool_prepare_answer_key` | Cache an assignment-wide answer key to `/tmp` for repeated grading |
-| `tool_smart_read_submission` | Return a tiered crop/full-page/adjacent-page reading plan |
-| `tool_list_question_submissions` | List all Question Submission IDs for a question (supports filter: all/ungraded/graded). Essential for parallel subagent grading. |
+| `tool_get_submission_grading_context` | Full grading context for a question submission |
+| `tool_get_question_rubric` | Rubric inspection without a submission ID |
+| `tool_list_question_submissions` | List Question Submission IDs, filterable by grade state |
+| `tool_get_next_ungraded` | Navigate to the next ungraded question submission |
 
-#### Grading — Answer Groups (Batch Grading)
+### Grading Write
 | Tool | Description |
 |------|-------------|
-| `tool_get_answer_groups` | List AI-clustered answer groups with sizes (markdown/JSON) |
-| `tool_get_answer_group_detail` | Inspect group members, crops, and graded status |
-| `tool_grade_answer_group` | **Batch-grade all submissions in a group** via `save_many_grades` |
+| `tool_apply_grade` | Apply rubric items, comments, and point adjustments |
+| `tool_create_rubric_item` | Create a rubric item |
+| `tool_update_rubric_item` | Update a rubric item |
+| `tool_delete_rubric_item` | Delete a rubric item |
 
-#### Grading — Write ⚠️
+### AI-Assisted / Workflow Helpers
 | Tool | Description |
 |------|-------------|
-| `tool_apply_grade` | Apply rubric items, set point adjustment, add comments |
-| `tool_create_rubric_item` | Create new rubric item for a question |
-| `tool_update_rubric_item` | Update rubric item description or weight (cascading) |
-| `tool_delete_rubric_item` | Delete a rubric item (cascading) |
-| `tool_get_next_ungraded` | Navigate to the next ungraded submission |
+| `tool_prepare_grading_artifact` | Save a question-specific grading artifact to `/tmp` |
+| `tool_assess_submission_readiness` | Estimate whether auto-grading is safe enough to attempt |
+| `tool_cache_relevant_pages` | Download crop and nearby pages to `/tmp` |
+| `tool_prepare_answer_key` | Save assignment-wide answer-key notes to `/tmp` |
+| `tool_smart_read_submission` | Return a crop-first reading plan |
 
-#### Regrade Requests
+### Answer Groups
 | Tool | Description |
 |------|-------------|
-| `tool_get_regrade_requests` | List all pending/completed regrade requests |
-| `tool_get_regrade_detail` | Student message, rubric, staff response for a specific regrade |
+| `tool_get_answer_groups` | List AI-clustered answer groups |
+| `tool_get_answer_group_detail` | Inspect one answer group |
+| `tool_grade_answer_group` | Batch-grade one answer group |
 
-#### Statistics
+### Regrades
 | Tool | Description |
 |------|-------------|
-| `tool_get_assignment_statistics` | Mean/median/std + per-question stats + low-scoring alerts |
+| `tool_get_regrade_requests` | List regrade requests |
+| `tool_get_regrade_detail` | Inspect one regrade request |
 
-### Resources (3)
+### Statistics
+| Tool | Description |
+|------|-------------|
+| `tool_get_assignment_statistics` | Assignment-level and per-question statistics |
+
+## Resources
+
 | URI | Description |
 |-----|-------------|
-| `gradescope://courses` | Auto-fetched course list |
-| `gradescope://courses/{id}/assignments` | Assignment list per course |
-| `gradescope://courses/{id}/roster` | Course roster |
+| `gradescope://courses` | Current course list |
+| `gradescope://courses/{course_id}/assignments` | Assignment list for a course |
+| `gradescope://courses/{course_id}/roster` | Roster for a course |
 
-### Prompts (7)
+## Prompts
+
 | Prompt | Description |
 |--------|-------------|
-| `summarize_course_progress` | Overview of all assignments and deadlines |
-| `manage_extensions_workflow` | Guided extension management |
-| `check_submission_stats` | Submission statistics overview |
-| `generate_rubric_from_outline` | AI-generated rubric suggestions from assignment structure |
-| `grade_submission_with_rubric` | AI-assisted grading of student submissions |
-| `review_regrade_requests` | AI review of pending regrade requests vs rubric |
-| `auto_grade_question` | Guided question-level auto-grading workflow with confidence gates |
+| `summarize_course_progress` | Summarize assignment status in a course |
+| `manage_extensions_workflow` | Guide extension-management work |
+| `check_submission_stats` | Summarize assignment submission status |
+| `generate_rubric_from_outline` | Draft a rubric from assignment structure |
+| `grade_submission_with_rubric` | Walk through grading one student's work |
+| `review_regrade_requests` | Review pending regrade requests |
+| `auto_grade_question` | Run a confidence-gated grading workflow for one question |
+
+## Architecture
+
+### Entry points
+- `src/gradescope_mcp/__main__.py`: loads `.env`, configures logging, runs the
+  FastMCP server
+- `src/gradescope_mcp/server.py`: registers all tools, resources, and prompts
+
+### Authentication
+- `src/gradescope_mcp/auth.py`: maintains a singleton `GSConnection`
+- Credentials come from `GRADESCOPE_EMAIL` and `GRADESCOPE_PASSWORD`
+- `.env` is loaded automatically when starting with `python -m gradescope_mcp`
+
+### Tool modules
+- `tools/courses.py`: course listing and roster parsing
+- `tools/assignments.py`: assignment listing and assignment write operations
+- `tools/submissions.py`: uploads, submission listing, grader discovery
+- `tools/extensions.py`: extension reads and writes
+- `tools/grading.py`: outline parsing, score exports, grading progress
+- `tools/grading_ops.py`: grading context, writes, rubric CRUD, navigation
+- `tools/grading_workflow.py`: `/tmp` artifacts, answer keys, readiness, page
+  caching, smart reading
+- `tools/answer_groups.py`: AI-assisted answer-group inspection and batch writes
+- `tools/regrades.py`: regrade listing and detail inspection
+- `tools/statistics.py`: assignment statistics
+- `tools/safety.py`: preview-first confirmation helpers for mutations
+
+## Important Behavior And Constraints
+
+### Write safety
+- Mutating tools return a preview when `confirm_write=False`
+- The actual change only happens with `confirm_write=True`
+- Rubric edits and deletions can cascade to existing grades
+- `tool_grade_answer_group` can affect many submissions at once and needs extra
+  care
+
+### Submission IDs
+- `tool_get_assignment_submissions` returns assignment-level Global Submission
+  IDs
+- Grading tools require Question Submission IDs
+- Use `tool_list_question_submissions`, `tool_get_next_ungraded`, or grading
+  context tools to get the correct IDs
+
+### Scoring direction
+- Gradescope questions may be `positive` or `negative` scoring
+- Rubric weights are stored as positive numbers in both modes
+- The scoring mode determines whether a checked rubric item adds or deducts
+  points
+
+### Scanned / handwritten assignments
+- Structured reference answers are often unavailable
+- This is expected, not necessarily a parsing failure
+- The workflow helpers are built to use crop regions, full pages, adjacent pages,
+  rubric text, and user-provided reference notes
 
 ## Quick Start
 
 ### 1. Prerequisites
 - Python 3.10+
-- [uv](https://docs.astral.sh/uv/) package manager
+- [uv](https://docs.astral.sh/uv/)
 
 ### 2. Install
 ```bash
 git clone https://github.com/Yuanpeng-Li/gradescope-mcp.git
 cd gradescope-mcp
 cp .env.example .env
-# Edit .env with your Gradescope credentials
 ```
 
-### 3. Configure AI Client
+Then edit `.env` with your Gradescope credentials.
 
-Add to your MCP client configuration (e.g., Claude Desktop `claude_desktop_config.json`):
+### 3. Run locally
+```bash
+uv run python -m gradescope_mcp
+```
+
+### 4. Configure an MCP client
+
+Example client configuration:
 
 ```json
 {
   "mcpServers": {
     "gradescope": {
       "command": "uv",
-      "args": ["run", "--directory", "/path/to/gradescope-mcp", "python", "-m", "gradescope_mcp"],
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/gradescope-mcp",
+        "python",
+        "-m",
+        "gradescope_mcp"
+      ],
       "env": {
         "GRADESCOPE_EMAIL": "your_email@example.com",
         "GRADESCOPE_PASSWORD": "your_password"
@@ -126,136 +233,107 @@ Add to your MCP client configuration (e.g., Claude Desktop `claude_desktop_confi
 }
 ```
 
-### 4. Debug with MCP Inspector
+### 5. Debug with MCP Inspector
 ```bash
 npx @modelcontextprotocol/inspector uv run python -m gradescope_mcp
 ```
 
+### 6. Run tests
+```bash
+uv run pytest -q
+```
+
 ## Assisted Grading Skill
 
-The repository includes one local skill:
+The repository includes one project-local skill:
 
 - `gradescope-assisted-grading`
 
-What it does:
-- Defines a preview-first grading workflow for this MCP server
-- Treats rubric mutations and grade writes as human-approved actions
-- Handles scanned PDF / handwritten assignments where structured reference answers may be missing
-- Supports user-provided reference answers saved to `/tmp` during a grading run
+It is intended for:
+- preview-first grading
+- rubric review before mutation
+- scanned exam grading
+- answer-group triage
+- explicit human approval before any grade write
 
-### Install The Skill
-
-Project-local `SKILL.md` files are not automatically discovered by most clients. To make this skill available, copy or symlink the skill folder into whatever skills directory your agent or client is configured to scan.
-
-Recommended install target: project-local `.agent/skills`
-
+### Install the skill locally
 ```bash
 mkdir -p .agent/skills
 ln -s "$(pwd)/skills/gradescope-assisted-grading" .agent/skills/gradescope-assisted-grading
 ```
 
-If you prefer copying instead of symlinking:
+If you prefer copying:
 
 ```bash
 mkdir -p .agent/skills
 cp -R skills/gradescope-assisted-grading .agent/skills/
 ```
 
-Alternative: user-level skills directory
-
-```bash
-mkdir -p ~/.agent/skills
-ln -s /path/to/gradescope-mcp/skills/gradescope-assisted-grading ~/.agent/skills/gradescope-assisted-grading
-```
-
-After installation, restart your client session if needed so it re-scans the available skills.
-
-### Verify Installation
-
-Confirm the skill is installed:
-
+### Verify installation
 ```bash
 ls .agent/skills/gradescope-assisted-grading
 cat .agent/skills/gradescope-assisted-grading/SKILL.md
 ```
 
-Then invoke it from your client by name, for example:
-
+Invoke it from a client with:
 - `Use the gradescope-assisted-grading skill`
 - `$gradescope-assisted-grading`
 
-Important:
-- Keep the skill folder name and the `name:` field in `SKILL.md` aligned.
-- Prefer `.agent/skills` for project-local workflows and `~/.agent/skills` for user-wide installation.
-- A symlink is usually better during development because updates in this repo are reflected immediately.
-
 ## Project Structure
-```
+
+```text
 gradescope-mcp/
-├── pyproject.toml
 ├── .env.example
+├── AGENT.md
+├── DEVLOG.md
+├── OPERATIONS_LOGS/
+│   └── RECORDS.md
+├── README.md
+├── pyproject.toml
 ├── skills/
 │   └── gradescope-assisted-grading/
-│       └── SKILL.md        # Human-approved grading workflow for agents
-├── src/gradescope_mcp/
-│   ├── __init__.py
-│   ├── __main__.py          # Entry point
-│   ├── server.py            # MCP server + tool/resource/prompt registration
-│   ├── auth.py              # Singleton Gradescope auth
-│   └── tools/
-│       ├── courses.py       # list_courses, get_course_roster
-│       ├── assignments.py   # get/modify/rename assignments
-│       ├── submissions.py   # upload, view submissions, graders
-│       ├── extensions.py    # get/set extensions
-│       ├── grading.py       # outline, scores, progress, submission content
-│       ├── grading_ops.py   # grading write ops, rubric CRUD, navigation
-│       ├── grading_workflow.py  # /tmp artifacts, read strategy, confidence
-│       ├── answer_groups.py # batch grading via AI answer groups
-│       ├── regrades.py      # regrade request listing + detail
-│       ├── statistics.py    # assignment statistics
-│       └── safety.py        # write confirmation helpers
-├── tests/                   # Automated test suite
-└── DEVLOG.md                # Full development history
+│       └── SKILL.md
+├── src/
+│   └── gradescope_mcp/
+│       ├── __init__.py
+│       ├── __main__.py
+│       ├── auth.py
+│       ├── server.py
+│       └── tools/
+│           ├── __init__.py
+│           ├── answer_groups.py
+│           ├── assignments.py
+│           ├── courses.py
+│           ├── extensions.py
+│           ├── grading.py
+│           ├── grading_ops.py
+│           ├── grading_workflow.py
+│           ├── regrades.py
+│           ├── safety.py
+│           ├── statistics.py
+│           └── submissions.py
+└── tests/
+    ├── test_answer_groups.py
+    ├── test_assignments_and_grading_ops.py
+    ├── test_extensions_and_answer_key.py
+    ├── test_grading_workflow.py
+    └── test_write_safety.py
 ```
 
-## Key Design Decisions
+## Development Notes
 
-### Two-Step Write Confirmation
-All write-capable tools default to `confirm_write=False`. When called without confirmation, they return a preview of what would change. The agent must explicitly pass `confirm_write=True` to execute the mutation.
+- `AGENT.md` summarizes the current architecture and maintenance expectations
+- `DEVLOG.md` records the implementation history
+- `OPERATIONS_LOGS/RECORDS.md` is the mutation log template for real-account
+  testing
 
-### Answer Group Batch Grading
-For questions with AI-Assisted Grading enabled, the server can list answer groups and batch-grade entire groups at once via the `save_many_grades` endpoint — reducing O(N) individual grades to O(groups).
+## Known Caveats
 
-### JSON Output Mode
-Key read tools (`get_submission_grading_context`, `get_answer_groups`, `get_answer_group_detail`) support `output_format="json"` for reliable agent parsing.
-
-### Smart Reading Strategy
-For scanned exams, the server provides a tiered reading plan: crop region first, full page if overflow detected, adjacent pages if answer spans boundaries. A confidence score guides whether the agent should auto-grade, request review, or skip.
-
-### Human-Approved Writes
-The intended grading workflow is agent-assisted, not blind full automation. Agents can read questions, draft reference answers, propose rubric changes, preview grades, and prepare batch grading actions, but rubric mutations and grade writes should be executed only after explicit human approval.
-
-### Reference Answer Behavior
-For scanned PDF / handwritten assignments, missing structured reference answers are expected. In these cases, the agent should rely on the prompt, rubric, scanned pages, and optionally user-provided model answers saved to `/tmp`.
-
-## Security
-- Credentials are loaded from environment variables only
-- `.env` is gitignored
-- Uploads require absolute file paths
-- All write-capable tools require `confirm_write=True`
-- Some Gradescope endpoints, such as extensions, may behave differently across assignment types; unsupported exam-style endpoints should not block grading workflows
-
-## Testing
-```bash
-uv run pytest -q   # 20 tests
-```
-
-## Built With
-- [`gradescopeapi`](https://github.com/nyuoss/gradescope-api) — Unofficial Gradescope Python API
-- [`mcp`](https://pypi.org/project/mcp/) — Model Context Protocol SDK
-- [`python-dotenv`](https://pypi.org/project/python-dotenv/) — Environment variable management
-- [`beautifulsoup4`](https://pypi.org/project/beautifulsoup4/) — HTML parsing for reverse-engineered endpoints
-
-## License
-
-MIT
+1. Gradescope behavior differs across assignment types; several tools rely on
+   HTML parsing or reverse-engineered endpoints.
+2. Roster parsing uses a custom parser because the upstream library parser is
+   unreliable when sections are present.
+3. Some assignment types do not support the extensions API even for staff users.
+4. Scanned assignments usually do not provide a structured answer key.
+5. Question grading requires Question Submission IDs, not assignment-level Global
+   Submission IDs.
