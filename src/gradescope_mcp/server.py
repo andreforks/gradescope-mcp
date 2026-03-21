@@ -644,7 +644,7 @@ def tool_prepare_grading_artifact(
     question_id: str = "",
     submission_id: str | None = None,
 ) -> str:
-    """Prepare a cached /tmp markdown artifact for grading a question.
+    """Prepare a cached `/tmp/gradescope-mcp` markdown artifact for grading a question.
 
     The artifact includes the prompt, rubric, reference-answer notes, page URLs,
     crop regions, and a confidence gate for auto-grading.
@@ -692,7 +692,7 @@ def tool_cache_relevant_pages(
     question_id: str = "",
     submission_id: str = "",
 ) -> str:
-    """Download the crop page and neighboring pages to /tmp for local review.
+    """Download the crop page and neighboring pages to `/tmp/gradescope-mcp` for local review.
 
     This is useful for scanned exams where the prompt is only available in page
     images and where agents may need to inspect adjacent pages before grading.
@@ -714,7 +714,8 @@ def tool_prepare_answer_key(course_id: str, assignment_id: str) -> str:
     """Prepare a complete answer key for an entire assignment.
 
     Extracts ALL questions from the outline (prompt text, reference answers,
-    explanations) and saves to /tmp/gradescope-answerkey-{assignment_id}.md.
+    explanations) and saves to
+    `/tmp/gradescope-mcp/gradescope-answerkey-{assignment_id}.md`.
     Run this ONCE before grading to avoid re-fetching question details.
 
     Args:
@@ -932,7 +933,8 @@ def auto_grade_question(
         f"Follow this workflow:\n\n"
         f"**Step 1 — Prepare Answer Key (one-time)**\n"
         f"Call tool_prepare_answer_key(course_id='{course_id}', "
-        f"assignment_id='{assignment_id}'). Read the generated /tmp file to "
+        f"assignment_id='{assignment_id}'). Read the generated "
+        f"/tmp/gradescope-mcp file to "
         f"understand all questions and reference answers.\n\n"
         f"**Step 2 — Get Grading Context**\n"
         f"Call tool_prepare_grading_artifact(course_id='{course_id}', "

@@ -31,7 +31,7 @@ workflows.
 - Submission listing for multiple assignment types
 - Grading progress, rubric context, answer groups, regrades, and statistics
 - Workflow helpers that cache grading artifacts and answer-key snapshots to
-  `/tmp`
+  `/tmp/gradescope-mcp`
 
 ### Write-oriented workflows
 - Uploading submissions
@@ -89,10 +89,10 @@ before any mutation is executed.
 ### AI-Assisted / Workflow Helpers
 | Tool | Description |
 |------|-------------|
-| `tool_prepare_grading_artifact` | Save a question-specific grading artifact to `/tmp` |
+| `tool_prepare_grading_artifact` | Save a question-specific grading artifact to `/tmp/gradescope-mcp` |
 | `tool_assess_submission_readiness` | Estimate whether auto-grading is safe enough to attempt |
-| `tool_cache_relevant_pages` | Download crop and nearby pages to `/tmp` |
-| `tool_prepare_answer_key` | Save assignment-wide answer-key notes to `/tmp` |
+| `tool_cache_relevant_pages` | Download crop and nearby pages to `/tmp/gradescope-mcp` |
+| `tool_prepare_answer_key` | Save assignment-wide answer-key notes to `/tmp/gradescope-mcp` |
 | `tool_smart_read_submission` | Return a crop-first reading plan |
 
 ### Answer Groups
@@ -152,7 +152,7 @@ before any mutation is executed.
 - `tools/extensions.py`: extension reads and writes
 - `tools/grading.py`: outline parsing, score exports, grading progress
 - `tools/grading_ops.py`: grading context, writes, rubric CRUD, navigation
-- `tools/grading_workflow.py`: `/tmp` artifacts, answer keys, readiness, page
+- `tools/grading_workflow.py`: `/tmp/gradescope-mcp` artifacts, answer keys, readiness, page
   caching, smart reading
 - `tools/answer_groups.py`: AI-assisted answer-group inspection and batch writes
 - `tools/regrades.py`: regrade listing and detail inspection
@@ -258,21 +258,21 @@ It is intended for:
 
 ### Install the skill locally
 ```bash
-mkdir -p .agent/skills
-ln -s "$(pwd)/skills/gradescope-assisted-grading" .agent/skills/gradescope-assisted-grading
+mkdir -p /tmp/gradescope-mcp/skills
+ln -s "$(pwd)/skills/gradescope-assisted-grading" /tmp/gradescope-mcp/skills/gradescope-assisted-grading
 ```
 
 If you prefer copying:
 
 ```bash
-mkdir -p .agent/skills
-cp -R skills/gradescope-assisted-grading .agent/skills/
+mkdir -p /tmp/gradescope-mcp/skills
+cp -R skills/gradescope-assisted-grading /tmp/gradescope-mcp/skills/
 ```
 
 ### Verify installation
 ```bash
-ls .agent/skills/gradescope-assisted-grading
-cat .agent/skills/gradescope-assisted-grading/SKILL.md
+ls /tmp/gradescope-mcp/skills/gradescope-assisted-grading
+cat /tmp/gradescope-mcp/skills/gradescope-assisted-grading/SKILL.md
 ```
 
 Invoke it from a client with:

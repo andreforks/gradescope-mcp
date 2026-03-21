@@ -56,7 +56,9 @@ def test_cache_relevant_pages_uses_authenticated_session(monkeypatch) -> None:
         "https://example.com/3.jpg",
     ]
     assert (
-        grading_workflow.pathlib.Path("/tmp/gradescope-pages-test-assign-test-question-test-submission/page_2.jpg")
+        grading_workflow.get_artifact_dir(
+            "gradescope-pages-test-assign-test-question-test-submission"
+        ).joinpath("page_2.jpg")
         .read_bytes()
         == b"image-bytes"
     )
@@ -107,7 +109,9 @@ def test_prepare_grading_artifact_auto_resolves_assignment(monkeypatch) -> None:
     result = grading_workflow.prepare_grading_artifact("course1", "bad", "q1")
 
     assert "Resolution: question `q1` was not found in assignment `bad`; auto-resolved to `good`." in result
-    artifact = grading_workflow.pathlib.Path("/tmp/gradescope-grading-good-q1.md").read_text(encoding="utf-8")
+    artifact = grading_workflow.get_artifact_path(
+        "gradescope-grading-good-q1.md"
+    ).read_text(encoding="utf-8")
     assert "- assignment_id: `good`" in artifact
     assert "- resolution: question `q1` was not found in assignment `bad`; auto-resolved to `good`." in artifact
 

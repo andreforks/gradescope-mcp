@@ -1,7 +1,7 @@
 """Higher-level grading workflow helpers.
 
 These helpers make grading agents more reliable and context-efficient by:
-1. Preparing a cached markdown artifact in /tmp with prompt/rubric/reference notes.
+1. Preparing a cached markdown artifact in /tmp/gradescope-mcp with prompt/rubric/reference notes.
 2. Recommending a read strategy that prefers crop regions before whole-page reads.
 3. Producing a coarse confidence score for whether auto-grading should proceed.
 """
@@ -14,6 +14,7 @@ import re
 from typing import Any
 from bs4 import BeautifulSoup
 
+from gradescope_mcp.cache import get_artifact_dir, get_artifact_path
 from gradescope_mcp.auth import AuthError, get_connection
 from gradescope_mcp.tools.grading import _get_outline_data
 from gradescope_mcp.tools.grading_ops import _get_grading_context
@@ -346,7 +347,7 @@ def prepare_grading_artifact(
     question_id: str,
     submission_id: str | None = None,
 ) -> str:
-    """Prepare a cached markdown artifact in /tmp for an assignment question.
+    """Prepare a cached markdown artifact in /tmp/gradescope-mcp for an assignment question.
 
     The artifact includes question metadata, prompt text when available, rubric,
     a reference answer or fallback draft, and read-strategy notes for agents.
@@ -395,8 +396,8 @@ def prepare_grading_artifact(
     )
     question_label = _build_question_label(question_id, questions)
 
-    artifact_path = pathlib.Path(
-        f"/tmp/gradescope-grading-{assignment_id}-{question_id}.md"
+    artifact_path = get_artifact_path(
+        f"gradescope-grading-{assignment_id}-{question_id}.md"
     )
 
     lines = [
@@ -604,7 +605,7 @@ def cache_relevant_pages(
     question_id: str,
     submission_id: str,
 ) -> str:
-    """Download the crop page and its neighbors to /tmp for local inspection."""
+    """Download the crop page and its neighbors to /tmp/gradescope-mcp for local inspection."""
     if not course_id or not question_id or not submission_id:
         return (
             "Error: course_id, question_id, and submission_id "
@@ -636,10 +637,9 @@ def cache_relevant_pages(
     if not relevant_pages:
         return "No relevant pages were found for this submission."
 
-    out_dir = pathlib.Path(
-        f"/tmp/gradescope-pages-{assignment_id}-{question_id}-{submission_id}"
+    out_dir = get_artifact_dir(
+        f"gradescope-pages-{assignment_id}-{question_id}-{submission_id}"
     )
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     saved_paths = []
     for page in relevant_pages:
@@ -669,7 +669,7 @@ def prepare_answer_key(course_id: str, assignment_id: str) -> str:
     - Explanation/reference answers (if provided by the instructor)
     - Explicit missing-answer markers when no instructor reference exists
 
-    Saves the result to /tmp/gradescope-answerkey-{assignment_id}.md.
+    Saves the result to /tmp/gradescope-mcp/gradescope-answerkey-{assignment_id}.md.
     This file can then be referenced when grading individual submissions
     without implying that every question has a true answer key.
 
@@ -789,7 +789,7 @@ def prepare_answer_key(course_id: str, assignment_id: str) -> str:
             f"- **⚠️ Missing answers:** {', '.join(missing_answers)}\n",
         )
 
-    artifact_path = pathlib.Path(f"/tmp/gradescope-answerkey-{assignment_id}.md")
+    artifact_path = get_artifact_path(f"gradescope-answerkey-{assignment_id}.md")
     artifact_path.write_text("\n".join(lines), encoding="utf-8")
 
     covered_answers = len(question_list) - len(missing_answers)
@@ -966,8 +966,8 @@ def smart_read_submission(
     )
 
     # Answer key reference
-    answer_key_path = f"/tmp/gradescope-answerkey-{assignment_id}.md"
-    if pathlib.Path(answer_key_path).exists():
+    answer_key_path = get_artifact_path(f"gradescope-answerkey-{assignment_id}.md")
+    if answer_key_path.exists():
         lines.append(f"\n📚 **Answer key available:** `{answer_key_path}`")
     else:
         lines.append(

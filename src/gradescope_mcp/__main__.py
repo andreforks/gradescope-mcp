@@ -8,8 +8,11 @@ import logging
 
 from dotenv import load_dotenv
 
+from gradescope_mcp.cache import configure_process_cache_env
+
 # Load environment variables from .env file
 load_dotenv()
+cache_root = configure_process_cache_env()
 
 # Configure logging
 logging.basicConfig(
@@ -19,6 +22,7 @@ logging.basicConfig(
 
 
 def main():
+    logging.getLogger(__name__).info("Using runtime cache directory: %s", cache_root)
     from gradescope_mcp.server import mcp
     mcp.run()
 

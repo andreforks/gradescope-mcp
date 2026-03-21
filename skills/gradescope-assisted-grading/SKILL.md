@@ -59,23 +59,23 @@ For individual submissions that are already graded, skip them by default. Only r
 
 ### 2. Build The Grading Basis
 
-Call `tool_prepare_answer_key(course_id, assignment_id)` once per assignment and read the generated `/tmp/gradescope-answerkey-{assignment_id}.md`.
+Call `tool_prepare_answer_key(course_id, assignment_id)` once per assignment and read the generated `/tmp/gradescope-mcp/gradescope-answerkey-{assignment_id}.md`.
 Treat that file as a grading-basis cache, not automatically as a true answer key. For scanned assignments it may contain explicit "no instructor-provided reference answer" placeholders instead of real answers.
 
 Interpret the result carefully:
-- If the user directly provides reference answers, save them to a `/tmp` reference file and use that file as the primary grading reference for the rest of the run.
+- If the user directly provides reference answers, save them to a `/tmp/gradescope-mcp` reference file and use that file as the primary grading reference for the rest of the run.
 - If structured reference answers exist, use them.
 - If reference answers are missing for scanned PDF or handwritten assignments, treat that as expected. Do not hallucinate an answer key from the placeholder text; draft your own grading basis from the prompt, rubric, and subject knowledge.
 - Your self-authored reference answer is an internal grading aid, not ground truth. If the prompt, rubric, or instructor guidance conflicts with it, defer to the prompt and rubric.
 
 When the user provides reference answers:
-- Save them to a temporary file such as `/tmp/gradescope-user-reference-{assignment_id}.md`.
+- Save them to a temporary file such as `/tmp/gradescope-mcp/gradescope-user-reference-{assignment_id}.md`.
 - Organize them by question label or question ID if possible.
 - Treat this user-supplied file as higher priority than generated fallback answers.
 - If the user-provided answer conflicts with the existing rubric, stop and ask whether the rubric should be updated before grading continues.
-- Treat `/tmp` as session-local cache, not durable storage. On a new conversation or restarted environment, re-read the generated answer key and ask the user to re-provide any external reference answers that are no longer present.
+- Treat `/tmp/gradescope-mcp` as session-local cache, not durable storage. On a new conversation or restarted environment, re-read the generated answer key and ask the user to re-provide any external reference answers that are no longer present.
 
-For each question, call `tool_prepare_grading_artifact(course_id, assignment_id, question_id)` and read `/tmp/gradescope-grading-{assignment_id}-{question_id}.md`.
+For each question, call `tool_prepare_grading_artifact(course_id, assignment_id, question_id)` and read `/tmp/gradescope-mcp/gradescope-grading-{assignment_id}-{question_id}.md`.
 
 Use the artifact to gather:
 - Prompt text or page-reading guidance
@@ -94,7 +94,7 @@ Scoring mode auto-detection:
 - Never begin grading a question without confirming its scoring mode. Using the wrong convention will systematically misgrade every submission.
 
 Reference priority order:
-1. User-provided reference answers saved in `/tmp`
+1. User-provided reference answers saved in `/tmp/gradescope-mcp`
 2. Instructor-provided structured reference answers from Gradescope
 3. Agent-drafted grading basis from prompt + rubric + subject knowledge
 
@@ -190,7 +190,7 @@ For each submission:
 - If the context indicates the submission is already graded, skip it unless the user explicitly requested regrading or overwrite behavior
 - Call `tool_assess_submission_readiness(course_id, assignment_id, question_id, submission_id)` before expensive reading whenever legibility, completeness, or automation suitability is uncertain
 - For scanned work, call `tool_smart_read_submission(course_id, assignment_id, question_id, submission_id)` and follow the tiered read order
-- If local visual review is needed, call `tool_cache_relevant_pages(course_id, assignment_id, question_id, submission_id)` and inspect the cached files in `/tmp`
+- If local visual review is needed, call `tool_cache_relevant_pages(course_id, assignment_id, question_id, submission_id)` and inspect the cached files in `/tmp/gradescope-mcp`
 
 Readiness-first rule:
 - If readiness is clearly low, do not spend additional tokens on OCR, full-page reading, or long analysis
@@ -396,8 +396,8 @@ At the end:
 - Always state uncertainty honestly.
 - Treat missing structured reference answers on scanned PDF assignments as normal, not as an extraction failure.
 - `tool_get_extensions` may be unsupported for some exam-style or scanned PDF assignments even for instructors; do not block grading on that tool.
-- If the user supplies reference answers, preserve them in `/tmp` and use them consistently across all submissions in that run.
-- At the start of a new conversation, do not assume prior `/tmp` reference files still exist. Rebuild them or ask the user to provide them again.
+- If the user supplies reference answers, preserve them in `/tmp/gradescope-mcp` and use them consistently across all submissions in that run.
+- At the start of a new conversation, do not assume prior `/tmp/gradescope-mcp` reference files still exist. Rebuild them or ask the user to provide them again.
 - Before grading, verify whether the question is positive-scoring or negative-scoring. Rubric weights are always positive in Gradescope; the `scoring_type` determines interpretation.
 - For write previews, show the exact rubric item IDs, point adjustment, and comment you intend to send so the user can approve the actual mutation, not a paraphrase.
 - Unless the question clearly uses positive scoring, default to deduction-based reasoning and treat full credit as zero deduction.

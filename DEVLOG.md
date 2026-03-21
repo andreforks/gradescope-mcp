@@ -52,7 +52,7 @@
   - preview-first writes with `confirm_write=True` gating
   - Global Submission ID vs Question Submission ID distinction
   - positive vs negative scoring semantics with always-positive rubric weights
-  - `/tmp` as ephemeral cache for grading artifacts and answer-key material
+  - `/tmp/gradescope-mcp` as ephemeral cache root for grading artifacts and answer-key material
 
 ### Current state
 
@@ -94,7 +94,7 @@
    - Added Global ID vs Question ID distinction warning.
    - Added JSON payload debugging hint to safety rules.
    - Previously graded submission skip-by-default policy.
-   - `/tmp` file persistence warning for cross-conversation sessions.
+   - `/tmp/gradescope-mcp` file persistence warning for cross-conversation sessions.
 
 #### Docstring corrections
 6. **`create_rubric_item` / `tool_create_rubric_item`** — updated weight semantics per scoring type (positive = adds points, negative = deducts points).

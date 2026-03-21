@@ -51,7 +51,7 @@ simple CRUD wrappers.
   Submission grading context, grade writes, rubric CRUD, question-submission
   discovery, navigation.
 - `src/gradescope_mcp/tools/grading_workflow.py`
-  Workflow helpers that save artifacts to `/tmp`, compute readiness, cache
+  Workflow helpers that save artifacts to `/tmp/gradescope-mcp`, compute readiness, cache
   pages, and build crop-first read plans.
 - `src/gradescope_mcp/tools/answer_groups.py`
   AI-assisted answer-group inspection and batch grading.
@@ -129,7 +129,7 @@ simple CRUD wrappers.
 ### Scanned assignment behavior
 - Missing structured answer keys are common and expected
 - Workflow helpers deliberately fall back to rubric + prompt + page evidence
-- Page images and cached artifacts are written to `/tmp`
+- Page images and cached artifacts are written to `/tmp/gradescope-mcp`
 
 ## Testing And Data Hygiene
 
@@ -165,7 +165,7 @@ npx @modelcontextprotocol/inspector uv run python -m gradescope_mcp
 3. Some assignment types return 401 for extension APIs even for staff users.
 4. `get_next_ungraded` and grading navigation need to guard against Gradescope
    self-loop behavior.
-5. `/tmp` artifacts are cache files, not durable project state.
+5. `/tmp/gradescope-mcp` artifacts are cache files, not durable project state.
 
 ## Maintenance Rule
 

@@ -1,4 +1,3 @@
-import pathlib
 from types import SimpleNamespace
 
 from gradescope_mcp.tools import extensions, grading_workflow
@@ -56,7 +55,9 @@ def test_prepare_answer_key_reports_missing_reference_answers(monkeypatch) -> No
     )
 
     result = grading_workflow.prepare_answer_key("878373", "5030457")
-    artifact_path = pathlib.Path("/tmp/gradescope-answerkey-5030457.md")
+    artifact_path = grading_workflow.get_artifact_path(
+        "gradescope-answerkey-5030457.md"
+    )
     artifact_text = artifact_path.read_text(encoding="utf-8")
 
     assert "✅ Grading basis prepared for **Demo Exam**" in result
