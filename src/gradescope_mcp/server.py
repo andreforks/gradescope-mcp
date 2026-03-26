@@ -74,17 +74,21 @@ class _SecretTokenVerifier:
 
 
 def _build_mcp() -> FastMCP:
+    host = os.environ.get("MCP_HOST", "localhost")
+    port = int(os.environ.get("MCP_PORT", "8000"))
     api_secret = os.environ.get("MCP_API_SECRET", "")
     if api_secret:
-        server_url = os.environ.get("MCP_SERVER_URL", "http://localhost:8000")
+        server_url = os.environ.get("MCP_SERVER_URL", f"http://{host}:{port}")
         logger.info("MCP_API_SECRET is set — bearer token auth enabled")
         return FastMCP(
             "Gradescope MCP Server",
+            host=host,
+            port=port,
             auth=AuthSettings(issuer_url=server_url, resource_server_url=None),  # type: ignore[arg-type]
             token_verifier=_SecretTokenVerifier(api_secret),
         )
     logger.warning("MCP_API_SECRET is not set — server is running without auth")
-    return FastMCP("Gradescope MCP Server")
+    return FastMCP("Gradescope MCP Server", host=host, port=port)
 
 
 # Create the MCP server
