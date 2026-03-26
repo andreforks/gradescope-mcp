@@ -5,7 +5,11 @@ Registers all tools, resources, and prompts with the MCP server.
 
 import json
 import logging
+import os
+import secrets
 
+from mcp.server.auth.provider import AccessToken
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 
 from gradescope_mcp.auth import get_connection, AuthError
@@ -58,8 +62,33 @@ from gradescope_mcp.tools.grading_workflow import (
 
 logger = logging.getLogger(__name__)
 
+
+class _SecretTokenVerifier:
+    def __init__(self, secret: str) -> None:
+        self._secret = secret
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        if not secrets.compare_digest(token, self._secret):
+            return None
+        return AccessToken(token=token, client_id="api_client", scopes=[])
+
+
+def _build_mcp() -> FastMCP:
+    api_secret = os.environ.get("MCP_API_SECRET", "")
+    if api_secret:
+        server_url = os.environ.get("MCP_SERVER_URL", "http://localhost:8000")
+        logger.info("MCP_API_SECRET is set — bearer token auth enabled")
+        return FastMCP(
+            "Gradescope MCP Server",
+            auth=AuthSettings(issuer_url=server_url, resource_server_url=None),  # type: ignore[arg-type]
+            token_verifier=_SecretTokenVerifier(api_secret),
+        )
+    logger.warning("MCP_API_SECRET is not set — server is running without auth")
+    return FastMCP("Gradescope MCP Server")
+
+
 # Create the MCP server
-mcp = FastMCP("Gradescope MCP Server")
+mcp = _build_mcp()
 
 # ============================================================
 # Tools

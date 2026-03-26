@@ -24,7 +24,7 @@ logging.basicConfig(
 def main():
     logging.getLogger(__name__).info("Using runtime cache directory: %s", cache_root)
     from gradescope_mcp.server import mcp
-    mcp.run()
+    mcp.run(transport="streamable-http")
 
 
 if __name__ == "__main__":
